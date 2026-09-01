@@ -1,0 +1,44 @@
+name: Parse Uploaded CV
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        required: true
+      storage_path:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  parse-cv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Parse CV
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          uv run python -m agents.cv.parser \
+            --user-id "${{ inputs.user_id }}" \
+            --storage-path "${{ inputs.storage_path }}"
+
+      - name: Dispatch match.yml for this user
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/match.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"opp_ids\":\"all\",\"user_id\":\"${{ inputs.user_id }}\"}}"

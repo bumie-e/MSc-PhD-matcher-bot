@@ -1,0 +1,38 @@
+name: Match Opportunities to Users
+
+on:
+  workflow_dispatch:
+    inputs:
+      opp_ids:
+        description: 'Comma-separated opportunity ids, or "all"'
+        required: true
+        default: "all"
+      user_id:
+        description: "Restrict to one user id (omit to run for all onboarded users)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run match agent
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          uv run python -m agents.matching.agent \
+            --opp-ids "${{ inputs.opp_ids }}" \
+            --user-id "${{ inputs.user_id }}"
