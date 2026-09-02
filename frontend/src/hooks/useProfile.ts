@@ -27,10 +27,13 @@ export function useProfile(userId: string | undefined) {
 
   const updateProfile = async (patch: Partial<UserProfile>) => {
     if (!userId) return;
+    // Upsert, not update: a DB trigger creates the profile row on signup
+    // (see 0005_auto_create_profile.sql), but upsert here is defense in
+    // depth — an update against a nonexistent row silently affects zero
+    // rows and looks like success.
     const { data, error } = await supabase
       .from("user_profiles")
-      .update(patch)
-      .eq("id", userId)
+      .upsert({ id: userId, ...patch }, { onConflict: "id" })
       .select()
       .single();
     if (!error) setProfile(data as UserProfile);

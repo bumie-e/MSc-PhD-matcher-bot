@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -56,12 +57,17 @@ export default function DashboardPage() {
           <h1 className="font-serif text-2xl font-semibold text-ink">Your opportunities</h1>
           <p className="text-sm text-muted">{visibleMatches.length} matching your threshold</p>
         </div>
-        <button
-          onClick={() => supabase.auth.signOut().then(() => router.replace("/login"))}
-          className="text-sm text-muted hover:text-ink"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-4">
+          <Link href="/settings" className="text-sm text-muted hover:text-ink">
+            Settings
+          </Link>
+          <button
+            onClick={() => supabase.auth.signOut().then(() => router.replace("/login"))}
+            className="text-sm text-muted hover:text-ink"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
