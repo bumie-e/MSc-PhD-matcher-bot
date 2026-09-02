@@ -11,7 +11,7 @@ export function OpportunityListRow({ opportunity, score }: { opportunity: Opport
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium text-ink">{opportunity.title}</p>
         <p className="truncate text-xs text-muted">
-          {opportunity.university}
+          {opportunity.university ?? "Multiple / unspecified institutions"}
           {opportunity.department ? ` · ${opportunity.department}` : ""}
         </p>
       </div>

@@ -115,8 +115,20 @@ def write_opportunities(opportunities: list[dict]) -> list[str]:
     for opp in opportunities:
         opp.setdefault("requirements", {})
         opp.setdefault("contact_info", {})
-    resp = db.table("opportunities").insert(opportunities).execute()
-    return [row["id"] for row in resp.data]
+
+    try:
+        resp = db.table("opportunities").insert(opportunities).execute()
+        return [row["id"] for row in resp.data]
+    except Exception as exc:  # noqa: BLE001 — one bad row must not lose the whole batch
+        print(f"Batch insert failed ({exc}); retrying opportunities one at a time.")
+        ids: list[str] = []
+        for opp in opportunities:
+            try:
+                resp = db.table("opportunities").insert(opp).execute()
+                ids.extend(row["id"] for row in resp.data)
+            except Exception as row_exc:  # noqa: BLE001
+                print(f"Skipping opportunity {opp.get('source_url')}: {row_exc}")
+        return ids
 
 
 TOOL_SCHEMAS = [

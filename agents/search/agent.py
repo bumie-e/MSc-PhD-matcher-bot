@@ -19,6 +19,8 @@ Groq is used for structuring (step 5), not for driving the scrape itself.
 import json
 import sys
 
+import openai
+
 from agents.llm import get_groq_client
 from agents.search import tools
 from config import settings
@@ -53,17 +55,25 @@ def structure_listing(listing: dict) -> dict | None:
         f"Snippet: {listing.get('snippet', '')}\n"
         f"URL: {listing['source_url']}"
     )
-    resp = client.chat.completions.create(
-        model=settings.SEARCH_MODEL,
-        messages=[
-            {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        response_format={"type": "json_object"},
-        max_completion_tokens=2048,
-        # See agents/cv/parser.py structure_cv_text for why this is needed.
-        extra_body={"reasoning_effort": "low"},
-    )
+    try:
+        resp = client.chat.completions.create(
+            model=settings.SEARCH_MODEL,
+            messages=[
+                {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=4096,
+            # See agents/cv/parser.py structure_cv_text for why this is needed.
+            extra_body={"reasoning_effort": "low"},
+        )
+    except openai.APIError as exc:
+        # A single malformed/truncated generation (Groq validates JSON
+        # server-side and 400s on it) must not take down the whole run —
+        # skip this listing and keep going.
+        print(f"Groq structuring failed for {listing.get('source_url')}: {exc}")
+        return None
+
     try:
         structured = json.loads(resp.choices[0].message.content)
     except (json.JSONDecodeError, TypeError, IndexError):

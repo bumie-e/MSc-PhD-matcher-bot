@@ -9,13 +9,13 @@ export type ParseStatus = "pending" | "done" | "error";
 export interface Opportunity {
   id: string;
   title: string;
-  university: string;
+  university: string | null;
   department: string | null;
   professor: string | null;
   type: OpportunityType;
   deadline: string | null;
   semester: string | null;
-  location: string;
+  location: string | null;
   stipend: string | null;
   requirements: Record<string, unknown>;
   how_to_apply: string | null;

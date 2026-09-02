@@ -35,7 +35,7 @@ export function DetailDrawer({
           <MatchScoreBadge score={match.score} />
         </div>
         <p className="mb-4 text-sm text-muted">
-          {opp.university}
+          {opp.university ?? "Multiple / unspecified institutions"}
           {opp.department ? ` · ${opp.department}` : ""}
           {opp.professor ? ` · ${opp.professor}` : ""}
         </p>
@@ -51,7 +51,7 @@ export function DetailDrawer({
           </div>
           <div>
             <dt className="text-muted">Location</dt>
-            <dd className="text-ink">{opp.location}</dd>
+            <dd className="text-ink">{opp.location ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-muted">Stipend</dt>
