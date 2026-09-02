@@ -56,6 +56,13 @@ def structure_cv_text(raw_text: str) -> dict:
             {"role": "user", "content": raw_text[:20000]},
         ],
         response_format={"type": "json_object"},
+        max_completion_tokens=4096,
+        # gpt-oss models emit a hidden reasoning trace before the JSON body;
+        # without this, unbounded reasoning can consume the whole token
+        # budget and leave nothing for the actual output (empty content ->
+        # json_validate_failed). Groq-specific param, not in the OpenAI SDK's
+        # typed kwargs, so it goes through extra_body.
+        extra_body={"reasoning_effort": "low"},
     )
     return json.loads(resp.choices[0].message.content)
 

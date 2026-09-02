@@ -60,6 +60,9 @@ def structure_listing(listing: dict) -> dict | None:
             {"role": "user", "content": user_content},
         ],
         response_format={"type": "json_object"},
+        max_completion_tokens=2048,
+        # See agents/cv/parser.py structure_cv_text for why this is needed.
+        extra_body={"reasoning_effort": "low"},
     )
     try:
         structured = json.loads(resp.choices[0].message.content)
