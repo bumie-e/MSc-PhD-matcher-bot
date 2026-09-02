@@ -7,6 +7,7 @@ const config: Config = {
       colors: {
         bg: "#f7f5f0",
         surface: "#ffffff",
+        "surface-2": "#f0ede6",
         border: "#ddd9d0",
         ink: "#141210",
         muted: "#7a7060",
