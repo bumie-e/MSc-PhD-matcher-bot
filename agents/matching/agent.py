@@ -67,6 +67,9 @@ def score_match(cv: dict, preferences: dict, opportunity: dict) -> dict:
             {"role": "user", "content": user_content},
         ],
         response_format={"type": "json_object"},
+        max_completion_tokens=2048,
+        # See agents/cv/parser.py structure_cv_text for why this is needed.
+        extra_body={"reasoning_effort": "low"},
     )
     return json.loads(resp.choices[0].message.content)
 
