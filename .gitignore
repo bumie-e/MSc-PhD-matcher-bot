@@ -156,8 +156,6 @@ activemq-data/
 
 # Environments
 .env
-.env.example
-.env.local.example
 .envrc
 .venv
 env/
@@ -226,5 +224,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-*.sql
+# Note: *.sql was deliberately removed here — supabase/migrations/*.sql
+# must be tracked in git, they're the source of truth for the DB schema.
 *.temp

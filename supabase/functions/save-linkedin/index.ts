@@ -5,6 +5,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+import { corsHeaders, handleCors } from "../_shared/cors.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const COOKIE_ENCRYPTION_KEY = Deno.env.get("COOKIE_ENCRYPTION_KEY")!; // base64, 32 raw bytes
@@ -38,13 +40,19 @@ async function encryptCookie(plaintext: string): Promise<string> {
 }
 
 Deno.serve(async (req) => {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Missing Authorization header" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
 
   const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -53,12 +61,12 @@ Deno.serve(async (req) => {
 
   const { data: userData, error: userErr } = await callerClient.auth.getUser();
   if (userErr || !userData?.user) {
-    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401, headers: corsHeaders });
   }
 
   const { cookie } = await req.json();
   if (!cookie || typeof cookie !== "string") {
-    return new Response(JSON.stringify({ error: "cookie is required" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "cookie is required" }), { status: 400, headers: corsHeaders });
   }
 
   const cookieEnc = await encryptCookie(cookie);
@@ -71,10 +79,10 @@ Deno.serve(async (req) => {
   });
 
   if (upsertErr) {
-    return new Response(JSON.stringify({ error: upsertErr.message }), { status: 400 });
+    return new Response(JSON.stringify({ error: upsertErr.message }), { status: 400, headers: corsHeaders });
   }
 
   return new Response(JSON.stringify({ ok: true }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });

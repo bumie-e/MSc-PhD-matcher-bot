@@ -4,18 +4,26 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+import { corsHeaders, handleCors } from "../_shared/cors.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SITE_URL = Deno.env.get("SITE_URL")!; // e.g. https://<user>.github.io/MSc-PhD-matcher-bot
 
 Deno.serve(async (req) => {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Missing Authorization header" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
 
   const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -24,7 +32,7 @@ Deno.serve(async (req) => {
 
   const { data: userData, error: userErr } = await callerClient.auth.getUser();
   if (userErr || !userData?.user) {
-    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401, headers: corsHeaders });
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -36,12 +44,12 @@ Deno.serve(async (req) => {
     .single();
 
   if (!profile?.is_admin) {
-    return new Response(JSON.stringify({ error: "Admin only" }), { status: 403 });
+    return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
   }
 
   const { email } = await req.json();
   if (!email || typeof email !== "string") {
-    return new Response(JSON.stringify({ error: "email is required" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "email is required" }), { status: 400, headers: corsHeaders });
   }
 
   const token = crypto.randomUUID();
@@ -53,7 +61,7 @@ Deno.serve(async (req) => {
   });
 
   if (insertErr) {
-    return new Response(JSON.stringify({ error: insertErr.message }), { status: 400 });
+    return new Response(JSON.stringify({ error: insertErr.message }), { status: 400, headers: corsHeaders });
   }
 
   const signupLink = `${SITE_URL}/signup?token=${token}&email=${encodeURIComponent(email)}`;
@@ -63,6 +71,6 @@ Deno.serve(async (req) => {
   console.log(`Invite created for ${email}: ${signupLink}`);
 
   return new Response(JSON.stringify({ ok: true, signupLink }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });

@@ -4,19 +4,27 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+import { corsHeaders, handleCors } from "../_shared/cors.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GITHUB_PAT = Deno.env.get("GITHUB_PAT")!;
 const GITHUB_REPO = Deno.env.get("GITHUB_REPO")!; // "owner/repo"
 
 Deno.serve(async (req) => {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Missing Authorization header" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
 
   const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -25,7 +33,7 @@ Deno.serve(async (req) => {
 
   const { data: userData, error: userErr } = await callerClient.auth.getUser();
   if (userErr || !userData?.user) {
-    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401, headers: corsHeaders });
   }
 
   const dispatchResp = await fetch(
@@ -47,10 +55,11 @@ Deno.serve(async (req) => {
     const detail = await dispatchResp.text();
     return new Response(JSON.stringify({ error: `GitHub dispatch failed: ${detail}` }), {
       status: 502,
+      headers: corsHeaders,
     });
   }
 
   return new Response(JSON.stringify({ ok: true }), {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });
