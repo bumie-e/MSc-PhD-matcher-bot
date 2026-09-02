@@ -24,12 +24,12 @@ export function OpportunityCard({ match, onClick }: { match: MatchWithOpportunit
         <MatchScoreBadge score={match.score} />
       </div>
       <p className="text-sm text-muted">
-        {opp.university}
+        {opp.university ?? "Multiple / unspecified institutions"}
         {opp.department ? ` · ${opp.department}` : ""}
       </p>
       <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted">
         <span className="rounded border border-border px-1.5 py-0.5 uppercase">{opp.type}</span>
-        <span>{opp.location}</span>
+        {opp.location && <span>{opp.location}</span>}
         {deadlineLabel && <span className="text-signal">{deadlineLabel}</span>}
         {opp.stipend && <span>· {opp.stipend}</span>}
       </div>

@@ -1,6 +1,15 @@
 """ScholarshipDB.net scraper. Broad global coverage, especially Africa,
 Asia, Middle East. Selectors unverified against live markup — re-inspect
 if search() returns zero results.
+
+Known issue (as of 2026-09): the site serves a Cloudflare *Origin*
+certificate (meant only for Cloudflare's edge-to-origin traffic) directly to
+public clients, so every request fails TLS verification with
+CERTIFICATE_VERIFY_FAILED. That's a server-side misconfiguration on their
+end, not fixable here without disabling cert verification (a real security
+downgrade) — this is caught and logged per-source by
+tools.scrape_all_global_sources, so it degrades gracefully rather than
+crashing the run. Re-check periodically in case they fix it.
 """
 
 import httpx

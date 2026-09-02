@@ -33,7 +33,7 @@ jobs:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           COOKIE_ENCRYPTION_KEY: ${{ secrets.COOKIE_ENCRYPTION_KEY }}
         run: |
-          uv run python -m agents.search.agent 2> search_stderr.log
+          uv run python -m agents.search.agent 2> >(tee search_stderr.log >&2)
           grep NEW_OPPORTUNITY_IDS search_stderr.log >> "$GITHUB_OUTPUT" || echo "NEW_OPPORTUNITY_IDS=" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch match.yml for new opportunities
