@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DetailDrawer } from "@/components/DetailDrawer";
 import { OpportunityCard } from "@/components/OpportunityCard";
+import { OpportunityListRow } from "@/components/OpportunityListRow";
+import { useAllOpportunities } from "@/hooks/useAllOpportunities";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useProfile } from "@/hooks/useProfile";
 import { useSession } from "@/hooks/useSession";
@@ -18,6 +20,7 @@ export default function DashboardPage() {
   const { session, loading: sessionLoading } = useSession();
   const { profile } = useProfile(session?.user.id);
   const { matches, loading, upsertNote } = useOpportunities(session?.user.id);
+  const { opportunities: allOpportunities, loading: allLoading, hasMore, loadMore } = useAllOpportunities();
   const router = useRouter();
 
   const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
@@ -41,6 +44,12 @@ export default function DashboardPage() {
       return aDate - bDate;
     });
   }, [matches, threshold, typeFilter, sortKey]);
+
+  const scoreByOpportunityId = useMemo(() => {
+    const map = new Map<string, number>();
+    matches.forEach((m) => map.set(m.opportunity_id, m.score));
+    return map;
+  }, [matches]);
 
   if (sessionLoading || !session) {
     return (
@@ -126,6 +135,43 @@ export default function DashboardPage() {
           }}
         />
       )}
+
+      <hr className="my-10 border-border" />
+
+      <section>
+        <h2 className="mb-1 font-serif text-xl font-semibold text-ink">All discovered opportunities</h2>
+        <p className="mb-4 text-sm text-muted">
+          Everything the daily search has found so far, regardless of your match score.
+        </p>
+
+        {allLoading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : allOpportunities.length === 0 ? (
+          <p className="text-sm text-muted">
+            Nothing found yet — the search agent runs daily, or you can trigger it from Settings.
+          </p>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              {allOpportunities.map((opp) => (
+                <OpportunityListRow
+                  key={opp.id}
+                  opportunity={opp}
+                  score={scoreByOpportunityId.get(opp.id) ?? null}
+                />
+              ))}
+            </div>
+            {hasMore && (
+              <button
+                onClick={loadMore}
+                className="mt-3 w-full rounded border border-border py-2 text-sm text-muted hover:text-ink"
+              >
+                Load more
+              </button>
+            )}
+          </>
+        )}
+      </section>
     </main>
   );
 }
