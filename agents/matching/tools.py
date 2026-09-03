@@ -35,6 +35,10 @@ def get_opportunities(opp_ids: list[str] | None) -> list[dict]:
 
 
 def write_match(user_id: str, opportunity_id: str, result: dict) -> None:
+    confidence = result.get("confidence")
+    if confidence not in ("low", "medium", "high"):
+        confidence = "medium"  # matches the column default if Groq omits/mangles the field
+
     db = get_client()
     db.table("matches").upsert(
         {
@@ -42,6 +46,7 @@ def write_match(user_id: str, opportunity_id: str, result: dict) -> None:
             "opportunity_id": opportunity_id,
             "score": result["score"],
             "score_breakdown": result.get("score_breakdown", {}),
+            "confidence": confidence,
             "summary": result.get("summary", ""),
             "pros": result.get("pros", []),
             "cons": result.get("cons", []),

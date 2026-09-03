@@ -10,6 +10,7 @@ import tempfile
 
 import pymupdf as fitz
 
+from agents import run_log
 from agents.db import get_client
 from agents.llm import get_groq_client
 from config import settings
@@ -69,25 +70,27 @@ def structure_cv_text(raw_text: str) -> dict:
 
 def run(user_id: str, storage_path: str) -> None:
     db = get_client()
-    try:
-        pdf_bytes = download_cv(storage_path)
-        raw_text = extract_text(pdf_bytes)
-        parsed = structure_cv_text(raw_text)
+    with run_log.track_run("cv_parse", user_id=user_id, storage_path=storage_path) as summary:
+        try:
+            pdf_bytes = download_cv(storage_path)
+            raw_text = extract_text(pdf_bytes)
+            parsed = structure_cv_text(raw_text)
 
-        db.table("user_cv").update(
-            {
-                "raw_text": raw_text,
-                "parsed": parsed,
-                "parse_status": "done",
-            }
-        ).eq("user_id", user_id).eq("storage_path", storage_path).execute()
-        print(f"Parsed CV for user {user_id}.")
-    except Exception as exc:  # noqa: BLE001 — must always record failure status
-        db.table("user_cv").update({"parse_status": "error"}).eq("user_id", user_id).eq(
-            "storage_path", storage_path
-        ).execute()
-        print(f"Failed to parse CV for user {user_id}: {exc}", file=sys.stderr)
-        raise
+            db.table("user_cv").update(
+                {
+                    "raw_text": raw_text,
+                    "parsed": parsed,
+                    "parse_status": "done",
+                }
+            ).eq("user_id", user_id).eq("storage_path", storage_path).execute()
+            summary["parse_status"] = "done"
+            print(f"Parsed CV for user {user_id}.")
+        except Exception as exc:  # noqa: BLE001 — must always record failure status
+            db.table("user_cv").update({"parse_status": "error"}).eq("user_id", user_id).eq(
+                "storage_path", storage_path
+            ).execute()
+            print(f"Failed to parse CV for user {user_id}: {exc}", file=sys.stderr)
+            raise
 
 
 if __name__ == "__main__":

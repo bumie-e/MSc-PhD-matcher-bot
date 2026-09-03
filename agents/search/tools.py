@@ -1,18 +1,21 @@
+from datetime import datetime, timedelta, timezone
+
 from agents import crypto
 from agents.db import get_client
-from agents.search.scrapers import linkedin_posts, tavily_search
+from agents.search.scrapers import linkedin_posts, researchgate, tavily_search, university_search
 from agents.search.scrapers.base import RawListing
 from agents.search.scrapers.registry import GLOBAL_KEYWORD_SCRAPERS
+from config import settings
 
 
 def get_all_user_keywords() -> list[dict]:
-    """Return [{user_id, keywords, field_of_study, degree_type, target_countries}]
-    for every onboarded user, so the search agent can build one deduplicated
-    global query set instead of re-searching per user."""
+    """Return [{user_id, keywords, field_of_study, degree_type, target_countries,
+    target_universities}] for every onboarded user, so the search agent can
+    build one deduplicated global query set instead of re-searching per user."""
     db = get_client()
     resp = (
         db.table("user_profiles")
-        .select("id, keywords, field_of_study, degree_type, target_countries")
+        .select("id, keywords, field_of_study, degree_type, target_countries, target_universities")
         .gte("onboarding_step", 5)
         .execute()
     )
@@ -23,6 +26,7 @@ def get_all_user_keywords() -> list[dict]:
             "field_of_study": row["field_of_study"],
             "degree_type": row["degree_type"],
             "target_countries": row["target_countries"] or [],
+            "target_universities": row["target_universities"] or [],
         }
         for row in resp.data
     ]
@@ -95,6 +99,71 @@ def scrape_linkedin_for_user(user_id: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001 — a stale/invalid cookie shouldn't kill the run
         print(f"[linkedin_posts] scrape failed for user {user_id}: {exc}")
         return []
+
+
+def scrape_universities_for_user(
+    user_id: str, target_universities: list[str], keywords: list[str]
+) -> list[dict]:
+    """Search each of a user's named target universities for openings
+    matching their keywords/field of study. One user's bad/unrecognized
+    university name shouldn't block the others."""
+    listings: list[dict] = []
+    for university in target_universities:
+        try:
+            listings.extend(_listings_to_dicts(university_search.search_for_university(university, keywords)))
+        except Exception as exc:  # noqa: BLE001 — one university failing shouldn't kill the run
+            print(f"[university_search] scrape failed for '{university}' (user {user_id}): {exc}")
+    return listings
+
+
+def scrape_researchgate_for_user(user_id: str, field_of_study: str | None, keywords: list[str]) -> list[dict]:
+    """Discover candidate ResearchGate professor profiles for this user's
+    field/keywords, skip any visited within the cooldown window, crawl the
+    rest, cache the resulting status in lab_visits, and return listings
+    for anyone found to be hiring."""
+    db = get_client()
+
+    try:
+        candidate_urls = researchgate.discover_profiles(
+            field_of_study, keywords, max_results=settings.LAB_DISCOVERY_MAX_LABS_PER_USER_PER_RUN
+        )
+    except Exception as exc:  # noqa: BLE001 — Tavily hiccup shouldn't kill the run
+        print(f"[researchgate] profile discovery failed for user {user_id}: {exc}")
+        return []
+
+    if not candidate_urls:
+        return []
+
+    cooldown = timedelta(days=settings.LAB_DISCOVERY_REVISIT_COOLDOWN_DAYS)
+    cutoff = (datetime.now(timezone.utc) - cooldown).isoformat()
+    resp = (
+        db.table("lab_visits")
+        .select("lab_url, visited_at")
+        .eq("user_id", user_id)
+        .in_("lab_url", candidate_urls)
+        .gte("visited_at", cutoff)
+        .execute()
+    )
+    recently_visited = {row["lab_url"] for row in resp.data}
+    to_visit = [url for url in candidate_urls if url not in recently_visited]
+    if not to_visit:
+        return []
+
+    try:
+        results = researchgate.search_for_profiles(to_visit)
+    except Exception as exc:  # noqa: BLE001 — Playwright/browser failure shouldn't kill the run
+        print(f"[researchgate] crawl failed for user {user_id}: {exc}")
+        return []
+
+    now = datetime.now(timezone.utc).isoformat()
+    visit_rows = [
+        {"user_id": user_id, "lab_url": url, "status": status, "visited_at": now}
+        for url, status, _ in results
+    ]
+    if visit_rows:
+        db.table("lab_visits").upsert(visit_rows, on_conflict="user_id,lab_url").execute()
+
+    return _listings_to_dicts([listing for _, _, listing in results if listing])
 
 
 def check_existing(source_urls: list[str]) -> set[str]:

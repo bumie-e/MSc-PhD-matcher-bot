@@ -1,6 +1,9 @@
+import { deadlineLabel, deadlineTone } from "@/lib/deadline";
 import type { Opportunity } from "@/lib/types";
 
 export function OpportunityListRow({ opportunity, score }: { opportunity: Opportunity; score: number | null }) {
+  const deadline = deadlineLabel(opportunity.deadline);
+
   return (
     <a
       href={opportunity.source_url}
@@ -18,7 +21,7 @@ export function OpportunityListRow({ opportunity, score }: { opportunity: Opport
       <div className="flex shrink-0 items-center gap-2 font-mono text-xs text-muted">
         <span className="rounded border border-border px-1.5 py-0.5 uppercase">{opportunity.type}</span>
         <span>{opportunity.source_name}</span>
-        {opportunity.deadline && <span>{opportunity.deadline}</span>}
+        {deadline && <span className={deadlineTone(opportunity.deadline)}>{deadline}</span>}
         {score !== null && (
           <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent">score {score}</span>
         )}
