@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 
+import { deadlineLabel, deadlineTone } from "@/lib/deadline";
 import type { MatchWithOpportunity, NoteStatus } from "@/lib/types";
 
+import { ConfidenceBadge } from "./ConfidenceBadge";
 import { MatchScoreBadge } from "./MatchScoreBadge";
 
 const STATUS_OPTIONS: NoteStatus[] = ["saved", "applied", "rejected", "offer"];
@@ -34,11 +36,14 @@ export function DetailDrawer({
           <h2 className="font-serif text-xl font-semibold text-ink">{opp.title}</h2>
           <MatchScoreBadge score={match.score} />
         </div>
-        <p className="mb-4 text-sm text-muted">
+        <p className="mb-2 text-sm text-muted">
           {opp.university ?? "Multiple / unspecified institutions"}
           {opp.department ? ` · ${opp.department}` : ""}
           {opp.professor ? ` · ${opp.professor}` : ""}
         </p>
+        <div className="mb-4">
+          <ConfidenceBadge confidence={match.confidence} />
+        </div>
 
         <dl className="mb-4 grid grid-cols-2 gap-3 font-mono text-xs">
           <div>
@@ -47,7 +52,12 @@ export function DetailDrawer({
           </div>
           <div>
             <dt className="text-muted">Deadline</dt>
-            <dd className="text-ink">{opp.deadline ?? "—"}</dd>
+            <dd className="text-ink">
+              {opp.deadline ?? "—"}
+              {deadlineLabel(opp.deadline) && (
+                <span className={`ml-1 ${deadlineTone(opp.deadline)}`}>({deadlineLabel(opp.deadline)})</span>
+              )}
+            </dd>
           </div>
           <div>
             <dt className="text-muted">Location</dt>

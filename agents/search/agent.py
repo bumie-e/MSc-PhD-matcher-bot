@@ -1,5 +1,4 @@
-"""Search Agent — Phase 2 scope: all sources except research lab discovery
-(Phase 3) and ResearchGate (Phase 5).
+"""Search Agent.
 
 Flow:
   1. Pull every onboarded user's keywords, build one deduplicated global set.
@@ -8,7 +7,12 @@ Flow:
      DAAD, ScholarshipDB, Fulbright) for those keywords, plus a global
      Tavily catch-all pass.
   3. For each user with a connected LinkedIn cookie, scrape their hashtag
-     feed too (per-user because the cookie is per-user).
+     feed too (per-user because the cookie is per-user). Users who named
+     specific target_universities also get a per-university Tavily search
+     scoped to their own keywords/field of study. Every user also gets a
+     ResearchGate professor-profile crawl (Phase 5): discover candidate
+     profiles via Tavily, then Playwright-check each one for hiring
+     signals, caching visited profiles in lab_visits.
   4. Drop listings whose source_url is already in `opportunities`.
   5. Ask Groq to normalize each new listing into the opportunities schema.
   6. Write the structured rows to Supabase.
@@ -21,6 +25,7 @@ import sys
 
 import openai
 
+from agents import run_log
 from agents.llm import get_groq_client
 from agents.search import tools
 from config import settings
@@ -81,6 +86,10 @@ def structure_listing(listing: dict) -> dict | None:
 
     structured["source_url"] = listing["source_url"]
     structured["source_name"] = listing["source_name"]
+    if listing["source_name"] == "researchgate":
+        # ResearchGate profiles are individual academics, never funded MSc
+        # programs — don't let a borderline Groq read mislabel this as msc.
+        structured["type"] = "phd"
     return structured
 
 
@@ -109,6 +118,26 @@ def run() -> list[str]:
             print(f"LinkedIn (user {row['user_id']}): {len(linkedin_listings)} raw listings.")
             raw_listings.extend(linkedin_listings)
 
+        if row["target_universities"]:
+            university_keywords = ([row["field_of_study"]] if row["field_of_study"] else []) + row["keywords"]
+            university_listings = tools.scrape_universities_for_user(
+                row["user_id"], row["target_universities"], university_keywords
+            )
+            if university_listings:
+                n_uni = len(row["target_universities"])
+                print(
+                    f"University search (user {row['user_id']}, {n_uni} universities): "
+                    f"{len(university_listings)} raw listings."
+                )
+                raw_listings.extend(university_listings)
+
+        researchgate_listings = tools.scrape_researchgate_for_user(
+            row["user_id"], row["field_of_study"], row["keywords"]
+        )
+        if researchgate_listings:
+            print(f"ResearchGate (user {row['user_id']}): {len(researchgate_listings)} hiring signal(s).")
+            raw_listings.extend(researchgate_listings)
+
     deduped_by_url = {listing["source_url"]: listing for listing in raw_listings}.values()
 
     existing_urls = tools.check_existing([listing["source_url"] for listing in deduped_by_url])
@@ -127,6 +156,8 @@ def run() -> list[str]:
 
 
 if __name__ == "__main__":
-    ids = run()
+    with run_log.track_run("search") as summary:
+        ids = run()
+        summary["new_opportunities"] = len(ids)
     # Emit for the orchestrator step to pick up via GITHUB_OUTPUT.
     print(f"NEW_OPPORTUNITY_IDS={','.join(ids)}", file=sys.stderr)

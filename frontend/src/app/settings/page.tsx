@@ -31,6 +31,14 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [cvUploading, setCvUploading] = useState(false);
+  const [cvMessage, setCvMessage] = useState<string | null>(null);
+
+  const [linkedinCookie, setLinkedinCookie] = useState("");
+  const [linkedinSaving, setLinkedinSaving] = useState(false);
+  const [linkedinMessage, setLinkedinMessage] = useState<string | null>(null);
+
   useEffect(() => {
     if (!profile) return;
     setFieldOfStudy(profile.field_of_study ?? "");
@@ -92,6 +100,54 @@ export default function SettingsPage() {
     }
 
     setSaving(false);
+  };
+
+  const handleCvUpload = async () => {
+    if (!cvFile || !session) return;
+    setCvUploading(true);
+    setCvMessage(null);
+
+    const storagePath = `${session.user.id}/${Date.now()}-${cvFile.name}`;
+    const { error: uploadError } = await supabase.storage.from("cvs").upload(storagePath, cvFile);
+    if (uploadError) {
+      setCvMessage(`Upload failed: ${uploadError.message}`);
+      setCvUploading(false);
+      return;
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const { error: fnError } = await supabase.functions.invoke("upload-cv", {
+      body: { storage_path: storagePath, filename: cvFile.name },
+      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+    });
+
+    setCvUploading(false);
+    setCvFile(null);
+    if (fnError) {
+      setCvMessage(`Upload failed: ${fnError.message}`);
+      return;
+    }
+    setCvMessage("CV uploaded — re-parsing and re-matching now.");
+  };
+
+  const handleLinkedinSave = async () => {
+    if (!linkedinCookie.trim()) return;
+    setLinkedinSaving(true);
+    setLinkedinMessage(null);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const { error } = await supabase.functions.invoke("save-linkedin", {
+      body: { cookie: linkedinCookie.trim() },
+      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+    });
+
+    setLinkedinSaving(false);
+    if (error) {
+      setLinkedinMessage(`Failed to save: ${error.message}`);
+      return;
+    }
+    setLinkedinCookie("");
+    setLinkedinMessage("Saved — the search agent will scan your LinkedIn feed on its next run.");
   };
 
   if (sessionLoading || profileLoading || !session) {
@@ -208,10 +264,55 @@ export default function SettingsPage() {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full rounded bg-accent py-2 text-sm font-medium text-white disabled:opacity-50"
+        className="mb-8 w-full rounded bg-accent py-2 text-sm font-medium text-white disabled:opacity-50"
       >
         {saving ? "Saving…" : "Save changes"}
       </button>
+
+      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
+        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">Re-upload CV</h2>
+        <p className="mb-4 text-sm text-muted">
+          Replacing your CV re-parses it and re-scores every opportunity against the new content.
+        </p>
+        <input
+          type="file"
+          accept="application/pdf"
+          onChange={(e) => setCvFile(e.target.files?.[0] ?? null)}
+          className="mb-4 block w-full text-sm"
+        />
+        {cvMessage && <p className="mb-4 text-sm text-accent">{cvMessage}</p>}
+        <button
+          onClick={handleCvUpload}
+          disabled={!cvFile || cvUploading}
+          className="w-full rounded border border-accent py-2 text-sm font-medium text-accent disabled:opacity-50"
+        >
+          {cvUploading ? "Uploading…" : "Upload new CV"}
+        </button>
+      </section>
+
+      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
+        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">LinkedIn</h2>
+        <p className="mb-4 text-sm text-muted">
+          Paste your <code className="rounded bg-surface-2 px-1 py-0.5">li_at</code> session cookie so the search
+          agent can scan hashtagged posts from your feed. It&apos;s encrypted at rest and never shown again once
+          saved.
+        </p>
+        <input
+          type="password"
+          value={linkedinCookie}
+          onChange={(e) => setLinkedinCookie(e.target.value)}
+          placeholder="li_at cookie value"
+          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+        {linkedinMessage && <p className="mb-4 text-sm text-accent">{linkedinMessage}</p>}
+        <button
+          onClick={handleLinkedinSave}
+          disabled={!linkedinCookie.trim() || linkedinSaving}
+          className="w-full rounded border border-accent py-2 text-sm font-medium text-accent disabled:opacity-50"
+        >
+          {linkedinSaving ? "Saving…" : "Save cookie"}
+        </button>
+      </section>
     </main>
   );
 }

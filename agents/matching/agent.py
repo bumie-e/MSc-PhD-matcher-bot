@@ -9,6 +9,7 @@ import json
 
 import openai
 
+from agents import run_log
 from agents.llm import get_groq_client
 from agents.matching import tools
 from config import settings
@@ -28,6 +29,7 @@ Output strictly this JSON shape, no prose:
     "funding_fit": int (0-100),
     "location_fit": int (0-100)
   },
+  "confidence": "low" or "medium" or "high",
   "summary": string (2-3 sentences),
   "pros": [string],
   "cons": [string],
@@ -35,7 +37,14 @@ Output strictly this JSON shape, no prose:
 }
 
 Be honest about weaknesses — cons and a lower score are more useful to the
-candidate than false encouragement."""
+candidate than false encouragement.
+
+"confidence" reflects how much you actually had to go on, not how good the
+match is: "high" when the CV has real detail (education, experience,
+skills) and the opportunity has clear requirements/stipend/deadline; "low"
+when the CV is sparse or the opportunity listing is vague/missing fields
+(e.g. no stated requirements, no deadline, generic "multiple institutions"
+university); "medium" otherwise."""
 
 
 def score_match(cv: dict, preferences: dict, opportunity: dict) -> dict | None:
@@ -117,4 +126,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ids = None if args.opp_ids == "all" else args.opp_ids.split(",")
-    run(ids, args.user_id or None)
+    with run_log.track_run("match", opp_ids=args.opp_ids, user_id=args.user_id) as summary:
+        summary["written"] = run(ids, args.user_id or None)

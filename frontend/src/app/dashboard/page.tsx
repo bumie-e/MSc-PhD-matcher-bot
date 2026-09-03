@@ -67,6 +67,14 @@ export default function DashboardPage() {
           <p className="text-sm text-muted">{visibleMatches.length} matching your threshold</p>
         </div>
         <div className="flex items-center gap-4">
+          {profile?.is_admin && (
+            <Link href="/admin" className="text-sm text-muted hover:text-ink">
+              Admin
+            </Link>
+          )}
+          <Link href="/pipeline" className="text-sm text-muted hover:text-ink">
+            Pipeline
+          </Link>
           <Link href="/settings" className="text-sm text-muted hover:text-ink">
             Settings
           </Link>

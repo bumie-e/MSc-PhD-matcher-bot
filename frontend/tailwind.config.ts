@@ -13,6 +13,7 @@ const config: Config = {
         muted: "#7a7060",
         accent: "#1e3a6e",
         signal: "#d97706",
+        "signal-green": "#2d6a4f",
       },
     },
   },

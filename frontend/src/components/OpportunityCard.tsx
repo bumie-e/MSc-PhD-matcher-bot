@@ -1,18 +1,12 @@
+import { deadlineLabel, deadlineTone } from "@/lib/deadline";
 import type { MatchWithOpportunity } from "@/lib/types";
 
+import { ConfidenceBadge } from "./ConfidenceBadge";
 import { MatchScoreBadge } from "./MatchScoreBadge";
-
-function daysUntil(dateStr: string | null): string | null {
-  if (!dateStr) return null;
-  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
-  if (diff < 0) return "Deadline passed";
-  if (diff === 0) return "Deadline today";
-  return `${diff}d left`;
-}
 
 export function OpportunityCard({ match, onClick }: { match: MatchWithOpportunity; onClick: () => void }) {
   const opp = match.opportunity;
-  const deadlineLabel = daysUntil(opp.deadline);
+  const deadline = deadlineLabel(opp.deadline);
 
   return (
     <button
@@ -30,14 +24,17 @@ export function OpportunityCard({ match, onClick }: { match: MatchWithOpportunit
       <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted">
         <span className="rounded border border-border px-1.5 py-0.5 uppercase">{opp.type}</span>
         {opp.location && <span>{opp.location}</span>}
-        {deadlineLabel && <span className="text-signal">{deadlineLabel}</span>}
+        {deadline && <span className={deadlineTone(opp.deadline)}>{deadline}</span>}
         {opp.stipend && <span>· {opp.stipend}</span>}
       </div>
-      {match.user_note?.status && match.user_note.status !== "saved" && (
-        <span className="w-fit rounded bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase text-accent">
-          {match.user_note.status}
-        </span>
-      )}
+      <div className="flex items-center justify-between gap-2">
+        <ConfidenceBadge confidence={match.confidence} />
+        {match.user_note?.status && match.user_note.status !== "saved" && (
+          <span className="w-fit rounded bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase text-accent">
+            {match.user_note.status}
+          </span>
+        )}
+      </div>
     </button>
   );
 }

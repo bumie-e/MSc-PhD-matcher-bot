@@ -5,6 +5,7 @@ export type DegreeType = "msc" | "phd" | "both";
 export type OpportunityType = "msc" | "phd";
 export type NoteStatus = "saved" | "applied" | "rejected" | "offer";
 export type ParseStatus = "pending" | "done" | "error";
+export type MatchConfidence = "low" | "medium" | "high";
 
 export interface Opportunity {
   id: string;
@@ -31,6 +32,7 @@ export interface Match {
   opportunity_id: string;
   score: number;
   score_breakdown: Record<string, number>;
+  confidence: MatchConfidence;
   summary: string;
   pros: string[];
   cons: string[];
