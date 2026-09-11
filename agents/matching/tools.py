@@ -27,11 +27,21 @@ def get_target_users(user_id: str | None = None) -> list[dict]:
 
 def get_opportunities(opp_ids: list[str] | None) -> list[dict]:
     db = get_client()
-    query = db.table("opportunities").select("*")
+    query = db.table("opportunities").select("*").eq("is_valid", True)
     if opp_ids:
         query = query.in_("id", opp_ids)
     resp = query.execute()
     return resp.data
+
+
+def mark_opportunities_invalid(opportunity_ids: list[str]) -> None:
+    """Flag opportunities the match agent determined aren't real postings
+    (e.g. blog/listicle content that slipped past the search agent's
+    structuring gate) so they stop being matched or shown."""
+    if not opportunity_ids:
+        return
+    db = get_client()
+    db.table("opportunities").update({"is_valid": False}).in_("id", opportunity_ids).execute()
 
 
 def write_match(user_id: str, opportunity_id: str, result: dict) -> None:

@@ -8,6 +8,7 @@ names ("ETH Zurich") rather than domains.
 from tavily import TavilyClient
 
 from agents.search.scrapers.base import RawListing
+from agents.search.scrapers.noise_filter import EXCLUDED_DOMAINS
 from config import settings
 
 SOURCE_NAME = "university_search"
@@ -24,8 +25,13 @@ def search_for_university(
     terms = keywords or [""]
 
     for keyword in terms:
-        query = f"{university} {keyword} PhD OR Masters open position application deadline".strip()
-        result = client.search(query=query, max_results=max_results_per_keyword)
+        query = (
+            f'"{university}" {keyword} (PhD OR Masters) '
+            f'(open position OR studentship OR "call for applications")'
+        ).strip()
+        result = client.search(
+            query=query, max_results=max_results_per_keyword, exclude_domains=EXCLUDED_DOMAINS
+        )
 
         for item in result.get("results", []):
             listings.append(

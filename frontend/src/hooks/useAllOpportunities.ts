@@ -22,6 +22,7 @@ export function useAllOpportunities() {
     const { data, count } = await supabase
       .from("opportunities")
       .select("*", { count: "exact" })
+      .eq("is_valid", true)
       .order("created_at", { ascending: false })
       .range(0, PAGE_SIZE - 1);
 
@@ -50,6 +51,7 @@ export function useAllOpportunities() {
     const { data, count } = await supabase
       .from("opportunities")
       .select("*", { count: "exact" })
+      .eq("is_valid", true)
       .order("created_at", { ascending: false })
       .range(opportunities.length, opportunities.length + PAGE_SIZE - 1);
 

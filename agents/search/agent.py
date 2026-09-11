@@ -32,8 +32,19 @@ from config import settings
 
 STRUCTURE_SYSTEM_PROMPT = """You turn a raw scraped PhD/MSc listing into structured JSON.
 
+First decide: does this text describe one concrete, applyable-to MSc/PhD
+position, studentship, or scholarship at a specific institution (e.g. a
+program page, a funded position announcement, a call for applications)?
+
+It is NOT a real opportunity if it's a blog post, listicle, "how to fund
+your PhD" / "how to find a supervisor" guide, forum or Q&A thread, news
+article, ranking page, a scholarship *directory* or search-tool page (as
+opposed to one specific scholarship), or anything else that doesn't name
+one applyable position/program.
+
 Output strictly this JSON shape, no prose:
 {
+  "is_opportunity": boolean,
   "title": string,
   "university": string,
   "department": string or null,
@@ -48,8 +59,10 @@ Output strictly this JSON shape, no prose:
   "contact_info": {"email": string or null, "url": string or null}
 }
 
-If a field can't be determined from the text, use null (or [] / {} for
-requirements/contact_info if entirely unknown). Never invent a deadline."""
+If "is_opportunity" is false, the other fields can be left null/empty —
+they're discarded. If a field can't be determined from the text, use null
+(or [] / {} for requirements/contact_info if entirely unknown). Never
+invent a deadline."""
 
 
 def structure_listing(listing: dict) -> dict | None:
@@ -82,6 +95,16 @@ def structure_listing(listing: dict) -> dict | None:
     try:
         structured = json.loads(resp.choices[0].message.content)
     except (json.JSONDecodeError, TypeError, IndexError):
+        return None
+
+    if not isinstance(structured, dict):
+        # Groq occasionally wraps/returns a bare JSON array even under
+        # json_object mode — treat as a malformed generation, not a crash.
+        print(f"Groq returned non-object JSON for {listing.get('source_url')}, skipping.")
+        return None
+
+    if not structured.pop("is_opportunity", True):
+        print(f"Not a real opportunity, skipping: {listing.get('source_url')}")
         return None
 
     structured["source_url"] = listing["source_url"]

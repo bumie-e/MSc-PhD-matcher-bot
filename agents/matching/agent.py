@@ -16,11 +16,23 @@ from config import settings
 
 SCORE_SYSTEM_PROMPT = """You evaluate how well a graduate opportunity matches a candidate.
 
-Score 0-100 based on: field/research alignment, degree requirements met,
-GPA/academic fit, relevant experience, funding fit, location/country fit.
+First check: does the "opportunity" data actually describe one concrete,
+applyable-to MSc/PhD position/studentship/scholarship at a specific
+institution — not a blog post, listicle, directory page, or other
+non-posting content that was mistakenly stored as an opportunity? If it
+doesn't hold up as a real opportunity (e.g. no real university, a
+title/summary that reads like generic advice content, nothing an
+applicant could actually submit an application to), set
+"not_an_opportunity": true and you may leave the other fields at their
+zero/empty defaults — do not force a plausible-looking score onto it.
+
+Otherwise, set "not_an_opportunity": false and score 0-100 based on:
+field/research alignment, degree requirements met, GPA/academic fit,
+relevant experience, funding fit, location/country fit.
 
 Output strictly this JSON shape, no prose:
 {
+  "not_an_opportunity": boolean,
   "score": int (0-100),
   "score_breakdown": {
     "field_alignment": int (0-100),
@@ -90,9 +102,17 @@ def score_match(cv: dict, preferences: dict, opportunity: dict) -> dict | None:
         return None
 
     try:
-        return json.loads(resp.choices[0].message.content)
+        result = json.loads(resp.choices[0].message.content)
     except (json.JSONDecodeError, TypeError, IndexError):
         return None
+
+    if not isinstance(result, dict):
+        # Groq occasionally wraps/returns a bare JSON array even under
+        # json_object mode — treat as a malformed generation, not a crash.
+        print(f"Groq returned non-object JSON for opportunity {opportunity.get('id')}, skipping.")
+        return None
+
+    return result
 
 
 def run(opp_ids: list[str] | None, user_id: str | None = None) -> int:
@@ -101,6 +121,7 @@ def run(opp_ids: list[str] | None, user_id: str | None = None) -> int:
     print(f"Matching {len(opportunities)} opportunities against {len(users)} user(s).")
 
     written = 0
+    invalid_opp_ids: set[str] = set()
     for user in users:
         cv = tools.get_user_cv(user["id"])
         if not cv:
@@ -109,11 +130,21 @@ def run(opp_ids: list[str] | None, user_id: str | None = None) -> int:
 
         preferences = tools.get_user_preferences(user["id"])
         for opp in opportunities:
+            if opp["id"] in invalid_opp_ids:
+                continue
             result = score_match(cv, preferences, opp)
             if result is None:
                 continue
+            if result.pop("not_an_opportunity", False):
+                print(f"Not a real opportunity, flagging invalid: {opp.get('source_url')}")
+                invalid_opp_ids.add(opp["id"])
+                continue
             tools.write_match(user["id"], opp["id"], result)
             written += 1
+
+    if invalid_opp_ids:
+        tools.mark_opportunities_invalid(list(invalid_opp_ids))
+        print(f"Flagged {len(invalid_opp_ids)} opportunity(ies) as invalid.")
 
     print(f"Wrote {written} match record(s).")
     return written

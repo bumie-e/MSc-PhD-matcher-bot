@@ -23,6 +23,7 @@ export interface Opportunity {
   contact_info: { email?: string; url?: string };
   source_url: string;
   source_name: string;
+  is_valid: boolean;
   created_at: string;
 }
 

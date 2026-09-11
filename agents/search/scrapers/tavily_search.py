@@ -6,6 +6,7 @@ first step in the Phase 3 research lab discovery loop.
 from tavily import TavilyClient
 
 from agents.search.scrapers.base import RawListing
+from agents.search.scrapers.noise_filter import EXCLUDED_DOMAINS
 from config import settings
 
 SOURCE_NAME = "tavily"
@@ -19,8 +20,12 @@ def search(keywords: list[str], max_results_per_keyword: int = 5) -> list[RawLis
     listings: list[RawListing] = []
 
     for keyword in keywords:
-        query = f"{keyword} PhD OR MSc opportunity application deadline"
-        result = client.search(query=query, max_results=max_results_per_keyword)
+        query = (
+            f'"{keyword}" (PhD OR MSc) (position OR studentship OR scholarship OR "call for applications")'
+        )
+        result = client.search(
+            query=query, max_results=max_results_per_keyword, exclude_domains=EXCLUDED_DOMAINS
+        )
 
         for item in result.get("results", []):
             listings.append(
