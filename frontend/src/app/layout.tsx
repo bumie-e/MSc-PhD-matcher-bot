@@ -22,7 +22,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${supabaseOrigin} https://*.supabase.co${process.env.NODE_ENV === "production" ? "" : " ws://localhost:*"}`,
+  `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace(/^https:/, "wss:")} https://*.supabase.co wss://*.supabase.co${process.env.NODE_ENV === "production" ? "" : " ws://localhost:*"}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
