@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -177,9 +178,7 @@ function Wizard({
       {/* Progress: a sidebar on desktop, a bar on phones. */}
       <aside className="bg-brand p-5 text-white md:flex md:flex-col md:justify-between md:p-10">
         <div>
-          <Link href="/" className="text-lg font-bold md:text-xl">
-            MSc PhD Matcher
-          </Link>
+          <Logo className="text-lg md:text-xl" />
 
           <div className="mt-4 md:hidden">
             <p className="text-base text-white/90">

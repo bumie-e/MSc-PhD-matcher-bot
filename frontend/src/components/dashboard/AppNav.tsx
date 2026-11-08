@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -46,9 +47,7 @@ export function AppNav({ active, isAdmin, width = "max-w-6xl" }: { active: strin
   return (
     <nav className={`mx-auto px-5 py-3 sm:px-6 ${width}`} aria-label="Main">
       <div className="flex items-center justify-between gap-4">
-        <Link href="/" className="text-lg font-bold text-white sm:text-xl">
-          MSc PhD Matcher
-        </Link>
+        <Logo className="text-lg text-white sm:text-xl" />
 
         <div className="hidden items-center gap-1 text-lg md:flex">
           {links.map((l) => (

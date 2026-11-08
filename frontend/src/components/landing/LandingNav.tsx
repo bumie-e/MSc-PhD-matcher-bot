@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
 import { useEffect, useState } from "react";
 
 import { MenuButton } from "@/components/dashboard/AppNav";
@@ -20,9 +21,7 @@ export function LandingNav({ signedIn, tryHref, tryLabel }: { signedIn: boolean;
   return (
     <nav className="mx-auto max-w-6xl px-5 py-3 sm:px-6 sm:py-4" aria-label="Main">
       <div className="flex items-center justify-between gap-3">
-        <Link href="/" className="whitespace-nowrap text-lg font-bold sm:text-xl">
-          MSc PhD Matcher
-        </Link>
+        <Logo className="text-lg sm:text-xl" />
 
         <div className="hidden items-center gap-6 text-lg md:flex">
           <a href="#how" className="hover:underline">
