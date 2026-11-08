@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { AuthShell, buttonClass, inputClass, labelClass } from "@/components/AuthShell";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -22,53 +23,55 @@ export default function LoginPage() {
 
     setSubmitting(false);
     if (signInError) {
-      setError(signInError.message);
+      setError(signInError.message === "Email not confirmed" ? "Confirm your email first. Check your inbox for the link we sent." : signInError.message);
       return;
     }
     router.replace("/");
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-border bg-surface p-8">
-        <h1 className="mb-1 font-serif text-2xl font-semibold text-ink">Welcome back</h1>
-        <p className="mb-6 text-sm text-muted">Sign in to see your matched opportunities.</p>
+    <AuthShell title="Welcome back" subtitle="Sign in to see your matched opportunities.">
+      <form onSubmit={handleSubmit}>
+        <label htmlFor="email" className={labelClass}>
+          Email
+        </label>
+        <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
 
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Email</label>
+        <label htmlFor="password" className={labelClass}>
+          Password
+        </label>
         <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Password</label>
-        <input
+          id="password"
           type="password"
           required
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+          className={`${inputClass} mb-2`}
         />
+        <p className="mb-5 text-right text-base">
+          <Link href="/forgot-password" className="text-brand underline">
+            Forgot password?
+          </Link>
+        </p>
 
-        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {error && (
+          <p role="alert" className="mb-5 rounded-lg bg-brand-soft px-4 py-3 text-base text-black">
+            {error}
+          </p>
+        )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded bg-accent py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {submitting ? "Signing in…" : "Sign in"}
+        <button type="submit" disabled={submitting} className={buttonClass}>
+          {submitting ? "Signing in..." : "Sign in"}
         </button>
 
-        <p className="mt-4 text-center text-xs text-muted">
-          Invite-only. Have a signup link?{" "}
-          <Link href="/signup" className="text-accent underline">
-            Use it here
+        <p className="mt-6 text-center text-base text-black/70">
+          New here?{" "}
+          <Link href="/signup" className="font-bold text-brand underline">
+            Create an account
           </Link>
         </p>
       </form>
-    </main>
+    </AuthShell>
   );
 }

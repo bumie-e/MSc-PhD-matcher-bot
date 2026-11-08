@@ -14,6 +14,13 @@ const config: Config = {
         accent: "#1e3a6e",
         signal: "#d97706",
         "signal-green": "#2d6a4f",
+        brand: "#1d4ed8",
+        "brand-deep": "#1e3a8a",
+        "brand-soft": "#eaf1ff",
+        "brand-mid": "#c9dcff",
+      },
+      fontFamily: {
+        sans: ["Calibri", "var(--font-carlito)", "Carlito", "ui-sans-serif", "system-ui", "sans-serif"],
       },
     },
   },
