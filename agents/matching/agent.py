@@ -1,16 +1,28 @@
-"""Match Agent — scores each (user, opportunity) pair with Groq (llama-3.3-70b-versatile).
+"""Match Agent: scores (user, opportunity) pairs with each user's OWN LLM key.
 
-Invoked by .github/workflows/match.yml with opp_ids ("all" or comma-separated)
-and an optional user_id (omit to run for all onboarded users).
+Only users who finished setup and connected a working key are matched; everyone
+else simply browses the shared pool. A run is bounded per user (see
+settings.MATCH_MAX_PER_USER_PER_RUN) so one key cannot be drained by accident.
+
+Invoked by .github/workflows/match.yml with opp_ids ("all" or comma-separated),
+an optional user_id (omit to run for all eligible users), and --rescore to
+re-score openings that already have a match (used after a CV is replaced).
 """
 
 import argparse
 import json
 
-import openai
-
 from agents import run_log
-from agents.llm import get_groq_client
+from agents.llm import (
+    LLM,
+    LLMAuthError,
+    LLMError,
+    LLMKeyMissing,
+    LLMModelUnavailable,
+    get_user_llm,
+    mark_key_invalid,
+    mark_key_status,
+)
 from agents.matching import tools
 from config import settings
 
@@ -52,18 +64,22 @@ Be honest about weaknesses — cons and a lower score are more useful to the
 candidate than false encouragement.
 
 "confidence" reflects how much you actually had to go on, not how good the
-match is: "high" when the CV has real detail (education, experience,
-skills) and the opportunity has clear requirements/stipend/deadline; "low"
-when the CV is sparse or the opportunity listing is vague/missing fields
-(e.g. no stated requirements, no deadline, generic "multiple institutions"
-university); "medium" otherwise."""
+match is: "high" when the candidate summary has real detail (education,
+experience, skills) and the opportunity has clear requirements/stipend/
+deadline; "low" when the summary is sparse or the opportunity listing is
+vague/missing fields (e.g. no stated requirements, no deadline, generic
+"multiple institutions" university); "medium" otherwise."""
 
 
-def score_match(cv: dict, preferences: dict, opportunity: dict) -> dict | None:
-    client = get_groq_client()
+def score_match(llm: LLM, cv: dict, preferences: dict, opportunity: dict) -> dict | None:
+    parsed = cv.get("parsed") or {}
+    # CVs parsed before the summary field was added don't have one yet —
+    # fall back to the full structured object rather than sending nothing
+    # until the user re-uploads and it gets backfilled.
+    candidate_profile = parsed.get("summary") or parsed
     user_content = json.dumps(
         {
-            "candidate_cv": cv.get("parsed", {}),
+            "candidate_profile": candidate_profile,
             "candidate_preferences": {
                 "field_of_study": preferences.get("field_of_study"),
                 "keywords": preferences.get("keywords"),
@@ -83,79 +99,104 @@ def score_match(cv: dict, preferences: dict, opportunity: dict) -> dict | None:
             },
         }
     )
-    try:
-        resp = client.chat.completions.create(
-            model=settings.MATCH_MODEL,
-            messages=[
-                {"role": "system", "content": SCORE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=4096,
-            # See agents/cv/parser.py structure_cv_text for why this is needed.
-            extra_body={"reasoning_effort": "low"},
-        )
-    except openai.APIError as exc:
-        # A single malformed/truncated generation must not take down the
-        # whole match run — skip this pair and keep going.
-        print(f"Groq scoring failed for opportunity {opportunity.get('id')}: {exc}")
+    result = llm.complete_json(SCORE_SYSTEM_PROMPT, user_content)
+    if result is None:
+        print(f"Unusable scoring output for opportunity {opportunity.get('id')}, skipping.")
         return None
-
-    try:
-        result = json.loads(resp.choices[0].message.content)
-    except (json.JSONDecodeError, TypeError, IndexError):
+    score = result.get("score")
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        print(f"Scoring output for opportunity {opportunity.get('id')} had no numeric score, skipping.")
         return None
-
-    if not isinstance(result, dict):
-        # Groq occasionally wraps/returns a bare JSON array even under
-        # json_object mode — treat as a malformed generation, not a crash.
-        print(f"Groq returned non-object JSON for opportunity {opportunity.get('id')}, skipping.")
-        return None
-
+    result["score"] = max(0, min(100, int(score)))
     return result
 
 
-def run(opp_ids: list[str] | None, user_id: str | None = None) -> int:
+def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = False) -> dict:
     users = tools.get_target_users(user_id)
     opportunities = tools.get_opportunities(opp_ids)
-    print(f"Matching {len(opportunities)} opportunities against {len(users)} user(s).")
+    print(f"Matching up to {len(opportunities)} opportunities for {len(users)} eligible user(s).")
 
-    written = 0
+    stats = {
+        "users": len(users),
+        "written": 0,
+        "users_skipped": 0,
+        "keys_rejected": 0,
+        "models_unavailable": 0,
+        "rate_limited": 0,
+    }
     invalid_opp_ids: set[str] = set()
+
     for user in users:
-        cv = tools.get_user_cv(user["id"])
+        uid = user["id"]
+        cv = tools.get_user_cv(uid)
         if not cv:
-            print(f"Skipping user {user['id']}: no parsed CV yet.")
+            print(f"Skipping user {uid[:8]}: no parsed CV yet.")
+            stats["users_skipped"] += 1
+            continue
+        try:
+            llm = get_user_llm(uid)
+        except LLMKeyMissing:
+            print(f"Skipping user {uid[:8]}: no usable AI key.")
+            stats["users_skipped"] += 1
             continue
 
-        preferences = tools.get_user_preferences(user["id"])
-        for opp in opportunities:
+        preferences = tools.get_user_preferences(uid)
+        todo = tools.select_opportunities_for_user(
+            opportunities,
+            preferences,
+            tools.get_scored_opportunity_ids(uid),
+            settings.MATCH_MAX_PER_USER_PER_RUN,
+            rescore=rescore,
+        )
+        print(f"User {uid[:8]} ({llm.provider}): scoring {len(todo)} opening(s).")
+
+        for opp in todo:
             if opp["id"] in invalid_opp_ids:
                 continue
-            result = score_match(cv, preferences, opp)
+            try:
+                result = score_match(llm, cv, preferences, opp)
+            except LLMAuthError:
+                print(f"User {uid[:8]}: key rejected, stopping their run.")
+                mark_key_invalid(uid, "Your AI provider rejected this key. Replace it in Settings.")
+                stats["keys_rejected"] += 1
+                break
+            except LLMModelUnavailable:
+                print(f"User {uid[:8]}: model {llm.model} retired, stopping their run.")
+                gone = f"Your model {llm.model} is no longer available. Choose another in Settings."
+                mark_key_status(uid, "model_unavailable", gone)
+                stats["models_unavailable"] += 1
+                break
+            except LLMError:
+                # Rate limited or overloaded: stop spending this user's calls
+                # now. The rest are picked up on the next run.
+                print(f"User {uid[:8]}: provider unavailable, stopping their run.")
+                stats["rate_limited"] += 1
+                break
             if result is None:
                 continue
             if result.pop("not_an_opportunity", False):
                 print(f"Not a real opportunity, flagging invalid: {opp.get('source_url')}")
                 invalid_opp_ids.add(opp["id"])
                 continue
-            tools.write_match(user["id"], opp["id"], result)
-            written += 1
+            tools.write_match(uid, opp["id"], result)
+            stats["written"] += 1
 
     if invalid_opp_ids:
         tools.mark_opportunities_invalid(list(invalid_opp_ids))
         print(f"Flagged {len(invalid_opp_ids)} opportunity(ies) as invalid.")
 
-    print(f"Wrote {written} match record(s).")
-    return written
+    print(f"Wrote {stats['written']} match record(s).")
+    return stats
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--opp-ids", default="all", help='"all" or comma-separated opportunity ids')
     parser.add_argument("--user-id", default=None)
+    parser.add_argument("--rescore", action="store_true", help="re-score openings that already have a match")
     args = parser.parse_args()
 
     ids = None if args.opp_ids == "all" else args.opp_ids.split(",")
-    with run_log.track_run("match", opp_ids=args.opp_ids, user_id=args.user_id) as summary:
-        summary["written"] = run(ids, args.user_id or None)
+    meta = {"opp_ids": args.opp_ids, "user_id": args.user_id, "rescore": args.rescore}
+    with run_log.track_run("match", **meta) as summary:
+        summary.update(run(ids, args.user_id or None, rescore=args.rescore))

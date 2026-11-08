@@ -3,45 +3,45 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
-import type { Match, MatchWithOpportunity, Opportunity, UserNote } from "@/lib/types";
+import type { Match, Opportunity, OpportunityItem, UserNote } from "@/lib/types";
 
+// Everything the user has a relationship with: openings that were scored for
+// them (matches) and openings they saved or are tracking (notes). The two are
+// independent, so tracking works without an AI key and scoring works without
+// tracking. Items are keyed by opportunity.
 export function useOpportunities(userId: string | undefined) {
-  const [matches, setMatches] = useState<MatchWithOpportunity[]>([]);
+  const [items, setItems] = useState<OpportunityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     if (!userId) {
-      setMatches([]);
+      setItems([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
 
-    const { data: matchRows } = await supabase
-      .from("matches")
-      .select("*, opportunity:opportunities(*)")
-      .eq("user_id", userId)
-      .order("score", { ascending: false });
+    const [{ data: matchRows }, { data: noteRows }] = await Promise.all([
+      supabase.from("matches").select("*, opportunity:opportunities(*)").eq("user_id", userId),
+      supabase.from("user_notes").select("*, opportunity:opportunities(*)").eq("user_id", userId),
+    ]);
 
-    const rows = (matchRows ?? []) as (Match & { opportunity: Opportunity })[];
-    const opportunityIds = rows.map((row) => row.opportunity_id);
+    const byOpportunity = new Map<string, OpportunityItem>();
 
-    const { data: noteRows } = opportunityIds.length
-      ? await supabase
-          .from("user_notes")
-          .select("*")
-          .eq("user_id", userId)
-          .in("opportunity_id", opportunityIds)
-      : { data: [] as UserNote[] };
+    for (const row of (matchRows ?? []) as (Match & { opportunity: Opportunity | null })[]) {
+      if (!row.opportunity) continue;
+      const { opportunity, ...match } = row;
+      byOpportunity.set(opportunity.id, { id: opportunity.id, opportunity, match: match as Match, user_note: null });
+    }
 
-    const notesByOpp = new Map((noteRows ?? []).map((note) => [note.opportunity_id, note as UserNote]));
+    for (const row of (noteRows ?? []) as (UserNote & { opportunity: Opportunity | null })[]) {
+      if (!row.opportunity) continue;
+      const { opportunity, ...note } = row;
+      const existing = byOpportunity.get(opportunity.id);
+      if (existing) existing.user_note = note as UserNote;
+      else byOpportunity.set(opportunity.id, { id: opportunity.id, opportunity, match: null, user_note: note as UserNote });
+    }
 
-    setMatches(
-      rows.map((row) => ({
-        ...row,
-        user_note: notesByOpp.get(row.opportunity_id) ?? null,
-      })),
-    );
+    setItems([...byOpportunity.values()]);
     setLoading(false);
   }, [userId]);
 
@@ -49,38 +49,48 @@ export function useOpportunities(userId: string | undefined) {
     refresh();
   }, [refresh]);
 
-  // New match rows land live as the Match Agent writes them (search.yml -> match.yml).
+  // New match rows land live as the Match Agent writes them.
   useEffect(() => {
     if (!userId) return;
     const channel = supabase
       .channel(`matches:${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "matches", filter: `user_id=eq.${userId}` },
-        () => refresh(),
-      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches", filter: `user_id=eq.${userId}` }, () => refresh())
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
   }, [userId, refresh]);
 
-  const upsertNote = async (opportunityId: string, patch: Partial<UserNote>) => {
+  // Save, pin, set a status or write a note on any opening. Creates the item
+  // if this is the first time the user touches that opening.
+  const upsertNote = async (opportunity: Opportunity, patch: Partial<UserNote>) => {
     if (!userId) return;
     const { data, error } = await supabase
       .from("user_notes")
-      .upsert({ user_id: userId, opportunity_id: opportunityId, ...patch }, { onConflict: "user_id,opportunity_id" })
+      .upsert({ user_id: userId, opportunity_id: opportunity.id, ...patch }, { onConflict: "user_id,opportunity_id" })
       .select()
       .single();
 
     if (!error) {
-      setMatches((prev) =>
-        prev.map((m) => (m.opportunity_id === opportunityId ? { ...m, user_note: data as UserNote } : m)),
+      const note = data as UserNote;
+      setItems((prev) =>
+        prev.some((i) => i.id === opportunity.id)
+          ? prev.map((i) => (i.id === opportunity.id ? { ...i, user_note: note } : i))
+          : [...prev, { id: opportunity.id, opportunity, match: null, user_note: note }],
       );
     }
     return { data, error };
   };
 
-  return { matches, loading, refresh, upsertNote };
+  // Un-save: delete the note. Items that were only there because of the note disappear.
+  const removeNote = async (opportunity: Opportunity) => {
+    if (!userId) return;
+    const { error } = await supabase.from("user_notes").delete().eq("user_id", userId).eq("opportunity_id", opportunity.id);
+    if (!error) {
+      setItems((prev) => prev.flatMap((i) => (i.id !== opportunity.id ? [i] : i.match ? [{ ...i, user_note: null }] : [])));
+    }
+    return { error };
+  };
+
+  return { items, loading, refresh, upsertNote, removeNote };
 }

@@ -20,6 +20,44 @@ LinkedIn uses a cookie called li_at as your session token. To copy it:
 4. Find the row named li_at, click it, copy the value (it's a long string starting with AQED...)
 5. Paste it into the LinkedIn tab in the app's Settings page
 
+## Bring your own AI key
+
+Browsing is free: the daily search fills a shared pool of openings that every
+signed-in user can browse, save and track, with no setup. **Personalised
+matching is optional** and runs on the user's *own* LLM key (Groq, OpenAI or
+Anthropic), so nobody's usage is billed to the project owner.
+
+How it works:
+
+1. In Settings (or the onboarding wizard) a user pastes a key. The `save-llm-key`
+   Edge Function checks it by asking the provider for its model list (no tokens
+   spent), picks a default model, encrypts the key with AES-256-GCM and stores it
+   in `user_llm_keys`. The browser can read only the key's status, never the key.
+2. The CV is read with that key (`parse-cv.yml`), then `match.yml` scores
+   openings with it. Each batch is capped (`MATCH_MAX_PER_USER_PER_RUN`, default
+   40), skips openings that are closed or of the wrong degree type, and skips
+   ones already scored, so costs stay predictable.
+3. If a provider rejects the key, the key is marked invalid, scoring for that
+   user stops, and the dashboard asks them to replace it. If the key works but
+   the chosen model was retired, the key is marked `model_unavailable`, scoring
+   stops, and Settings refreshes the model list and asks the user to pick another.
+   Choosing one resumes scoring automatically.
+
+Only chat models are offered (embeddings, speech, image, moderation, dated
+snapshots and OpenAI's o-series are filtered out, capped at 8, cheapest sensible
+default first). See `curateModels` in `supabase/functions/_shared/llm-providers.ts`.
+
+The owner's `GROQ_API_KEY` is used **only** by the shared search agent to turn
+scraped listings into structured openings. `COOKIE_ENCRYPTION_KEY` must be set in
+GitHub Actions secrets and Supabase secrets (it decrypts user keys). The
+`save-llm-key` function also needs `GITHUB_PAT` and `GITHUB_REPO`, like the other
+dispatching functions.
+
+Deploying this change: run migration `0012_user_llm_keys.sql`, deploy
+`save-llm-key` and the updated `upload-cv` (`supabase functions deploy
+save-llm-key upload-cv`), then add the new `rescore` input by merging the
+updated workflows.
+
 ## Status
 
 Phases 1–3 are implemented: Supabase schema + RLS, invite-only auth, the CV

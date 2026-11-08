@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { LandingNav } from "./LandingNav";
+
 const SOURCES = [
   "DAAD",
   "Erasmus Mundus",
@@ -17,16 +19,16 @@ const SOURCES = [
 
 const STEPS = [
   {
-    title: "Upload your CV",
-    body: "We read your education, experience and research interests, and you check that we got them right.",
+    title: "Browse straight away",
+    body: "Every opening the daily search finds is listed with its deadline and funding. Save the ones you like to your pipeline.",
   },
   {
-    title: "We search every day",
-    body: "Scholarship sites, university pages and research networks are scanned for MSc and PhD openings in your field.",
+    title: "Connect your AI key",
+    body: "When you want scores, add your own Groq, OpenAI or Anthropic key and upload your CV. You pay your provider directly.",
   },
   {
     title: "Review ranked matches",
-    body: "Each opportunity gets a score against your profile, with the reasons, the deadline and what to submit.",
+    body: "Each opening gets a score against your profile, with the reasons, the gaps and what to submit.",
   },
 ];
 
@@ -38,18 +40,18 @@ const FEATURES = [
   },
   {
     title: "Deadlines first",
-    body: "Opportunities are sorted by what closes soonest, and urgent ones are flagged before you miss them.",
+    body: "Openings can be sorted by what closes soonest, and urgent ones are flagged before you miss them.",
     icon: "M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z",
   },
   {
-    title: "Your own pipeline",
-    body: "Save positions, add notes, reorder them and track each application from interested to submitted.",
+    title: "A pipeline that needs no setup",
+    body: "Save positions, add notes and track each application from interested to offer. This works without an AI key.",
     icon: "M4 6h16M4 12h16M4 18h10",
   },
   {
-    title: "Real opportunities only",
-    body: "Ads, news and expired listings are filtered out, so what you see is a position you can apply for.",
-    icon: "M5 13l4 4L19 7",
+    title: "You control the AI and its cost",
+    body: "Matching runs on your own key, which is stored encrypted. Scoring happens in small batches, so you always know what you spend.",
+    icon: "M12 3l8 4v5c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V7z",
   },
 ];
 
@@ -98,33 +100,13 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
   return (
     <div className="bg-white font-sans text-black">
       <header className="bg-brand text-white">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5" aria-label="Main">
-          <Link href="/" className="text-xl font-bold">
-            MSc PhD Matcher
-          </Link>
-          <div className="flex items-center gap-5 text-lg">
-            <a href="#how" className="hidden hover:underline sm:inline">
-              How it works
-            </a>
-            <a href="#features" className="hidden hover:underline sm:inline">
-              Features
-            </a>
-            {!signedIn && (
-              <Link href="/login" className="hover:underline">
-                Sign in
-              </Link>
-            )}
-            <Link href={tryHref} className="rounded-lg bg-white px-4 py-2 font-bold text-brand hover:bg-brand-soft">
-              {tryLabel}
-            </Link>
-          </div>
-        </nav>
+        <LandingNav signedIn={signedIn} tryHref={tryHref} tryLabel={tryLabel} />
 
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-24 pt-14 md:grid-cols-[6fr_5fr] md:pt-20">
-          <div>
-            <h1 className="max-w-xl text-5xl font-bold leading-[1.05] md:text-6xl">Find the MSc and PhD positions that fit your CV.</h1>
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-5 pb-20 pt-10 sm:px-6 md:grid-cols-[6fr_5fr] md:pb-24 md:pt-20">
+          <div className="min-w-0">
+            <h1 className="max-w-xl text-4xl font-bold leading-[1.08] sm:text-5xl md:text-6xl">Find the MSc and PhD positions that fit your CV.</h1>
             <p className="mt-6 max-w-lg text-xl leading-relaxed text-white/90">
-              Upload your CV once. We search scholarship sites and university pages every day, then rank what we find by how well it matches you and when it closes.
+              Browse open MSc and PhD positions from scholarship sites and university pages, updated every day. Connect your own AI key when you want each one scored against your CV.
             </p>
             <div className="mt-9 flex flex-wrap gap-4">
               <Link href={tryHref} className="rounded-lg bg-white px-7 py-3.5 text-lg font-bold text-brand hover:bg-brand-soft">
@@ -136,7 +118,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
             </div>
           </div>
 
-          <div className="relative" aria-label="Example of ranked matches">
+          <div className="relative min-w-0" aria-label="Example of ranked matches">
             <div className="space-y-4 rounded-3xl bg-brand-deep p-5 md:rotate-1">
               <PreviewCard title="PhD in Machine Learning" place="Example University, Germany" score={92} confidence="High" deadline="in 9 days" tone="high" />
               <PreviewCard title="MSc Data Science, fully funded" place="Example Institute, Netherlands" score={81} confidence="High" deadline="in 3 weeks" tone="high" />
@@ -147,10 +129,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         </div>
       </header>
 
-      <section id="how" className="scroll-mt-4 px-6 py-24">
+      <section id="how" className="scroll-mt-4 px-5 py-16 sm:px-6 sm:py-24">
         <div className="mx-auto max-w-6xl">
-          <h2 className="max-w-xl text-4xl font-bold">How it works</h2>
-          <p className="mt-3 max-w-xl text-xl text-black/70">Three steps, and the second one happens without you.</p>
+          <h2 className="max-w-xl text-3xl font-bold sm:text-4xl">How it works</h2>
+          <p className="mt-3 max-w-xl text-xl text-black/70">Browsing is free and needs no setup. Matching is the optional part.</p>
           <ol className="mt-12 grid gap-6 md:grid-cols-3">
             {STEPS.map((step, i) => (
               <li key={step.title} className="rounded-3xl bg-brand-soft p-8">
@@ -163,9 +145,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         </div>
       </section>
 
-      <section id="features" className="scroll-mt-4 bg-brand-soft px-6 py-24">
+      <section id="features" className="scroll-mt-4 bg-brand-soft px-5 py-16 sm:px-6 sm:py-24">
         <div className="mx-auto max-w-6xl">
-          <h2 className="max-w-xl text-4xl font-bold">Built to save you hours of searching</h2>
+          <h2 className="max-w-xl text-3xl font-bold sm:text-4xl">Built to save you hours of searching</h2>
           <div className="mt-12 grid gap-x-12 gap-y-10 md:grid-cols-2">
             {FEATURES.map((f) => (
               <div key={f.title} className="flex gap-5">
@@ -182,9 +164,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         </div>
       </section>
 
-      <section className="px-6 py-24">
+      <section className="px-5 py-16 sm:px-6 sm:py-24">
         <div className="mx-auto max-w-6xl">
-          <h2 className="max-w-xl text-4xl font-bold">Where we look</h2>
+          <h2 className="max-w-xl text-3xl font-bold sm:text-4xl">Where we look</h2>
           <p className="mt-3 max-w-xl text-xl text-black/70">One search across the places you would otherwise check by hand.</p>
           <ul className="mt-10 flex flex-wrap gap-3">
             {SOURCES.map((s) => (
@@ -196,11 +178,11 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         </div>
       </section>
 
-      <section className="px-6 pb-24">
-        <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-8 rounded-3xl bg-brand p-10 text-white md:flex-row md:items-center md:p-14">
+      <section className="px-5 pb-16 sm:px-6 sm:pb-24">
+        <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-8 rounded-3xl bg-brand p-7 text-white sm:p-10 md:flex-row md:items-center md:p-14">
           <div>
-            <h2 className="max-w-md text-4xl font-bold leading-tight">Start with your CV. We handle the searching.</h2>
-            <p className="mt-3 text-xl text-white/90">Free to use. Setup takes about five minutes.</p>
+            <h2 className="max-w-md text-3xl font-bold sm:text-4xl leading-tight">Start browsing. Add your CV when you are ready.</h2>
+            <p className="mt-3 text-xl text-white/90">Free to use. Matching runs on your own AI key.</p>
           </div>
           <Link href={tryHref} className="shrink-0 rounded-lg bg-white px-8 py-4 text-xl font-bold text-brand hover:bg-brand-soft">
             {tryLabel}

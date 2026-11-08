@@ -56,6 +56,20 @@ Deno.serve(async (req) => {
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+  // Reading a CV runs on the user's own AI key, so one must be connected first.
+  const { data: keyRow } = await admin
+    .from("user_llm_keys")
+    .select("status")
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+  if (!keyRow || keyRow.status !== "valid") {
+    return new Response(
+      JSON.stringify({ error: "Connect your AI key before uploading a CV.", code: "llm_key_required" }),
+      { status: 400, headers: corsHeaders },
+    );
+  }
+
   const { error: insertErr } = await admin.from("user_cv").insert({
     user_id: userData.user.id,
     filename: filename ?? storage_path.split("/").pop(),

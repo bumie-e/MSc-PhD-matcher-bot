@@ -38,6 +38,9 @@ def collect_global_keywords(user_rows: list[dict]) -> list[str]:
         if row["field_of_study"]:
             seen.add(row["field_of_study"])
         seen.update(row["keywords"])
+    if not seen:
+        # Nobody has set interests yet: still fill the shared, browsable pool.
+        seen.update(settings.DEFAULT_SEARCH_KEYWORDS)
     return sorted(seen)
 
 

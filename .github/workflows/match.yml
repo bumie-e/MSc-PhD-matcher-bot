@@ -8,9 +8,13 @@ on:
         required: true
         default: "all"
       user_id:
-        description: "Restrict to one user id (omit to run for all onboarded users)"
+        description: "Restrict to one user id (omit to run for all eligible users)"
         required: false
         default: ""
+      rescore:
+        description: "Re-score openings that already have a match (after a CV change)"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -31,8 +35,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # Decrypts each user's own AI key. No shared LLM key is used here.
+          COOKIE_ENCRYPTION_KEY: ${{ secrets.COOKIE_ENCRYPTION_KEY }}
         run: |
           uv run python -m agents.matching.agent \
             --opp-ids "${{ inputs.opp_ids }}" \
-            --user-id "${{ inputs.user_id }}"
+            --user-id "${{ inputs.user_id }}" \
+            ${{ inputs.rescore == 'true' && '--rescore' || '' }}

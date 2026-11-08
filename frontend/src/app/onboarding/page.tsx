@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { OnboardingWizard } from "@/components/OnboardingWizard";
+import { PageLoading } from "@/components/ui/PageShell";
 import { useSession } from "@/hooks/useSession";
 
 export default function OnboardingPage() {
@@ -14,17 +15,7 @@ export default function OnboardingPage() {
     if (!loading && !session) router.replace("/login");
   }, [loading, session, router]);
 
-  if (loading || !session) {
-    return (
-      <main className="flex min-h-screen items-center justify-center text-muted">
-        <p>Loading…</p>
-      </main>
-    );
-  }
+  if (loading || !session) return <PageLoading />;
 
-  return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-12">
-      <OnboardingWizard userId={session.user.id} />
-    </main>
-  );
+  return <OnboardingWizard userId={session.user.id} />;
 }

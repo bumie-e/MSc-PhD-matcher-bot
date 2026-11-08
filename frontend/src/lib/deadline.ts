@@ -16,3 +16,19 @@ export function deadlineTone(dateStr: string | null): string {
   if (diff <= 30) return "text-signal";
   return "text-muted";
 }
+
+/** Whole days until the deadline; null when unknown, negative when passed. */
+export function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
+}
+
+export function shortDeadline(dateStr: string | null): string | null {
+  const d = daysUntil(dateStr);
+  if (d === null) return null;
+  if (d < 0) return "Closed";
+  if (d === 0) return "Closes today";
+  if (d === 1) return "Closes tomorrow";
+  if (d <= 60) return `Closes in ${d} days`;
+  return `Closes ${new Date(dateStr!).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+}

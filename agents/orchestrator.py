@@ -24,7 +24,7 @@ def dispatch_match_workflow(repo: str, token: str, opp_ids: list[str]) -> None:
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
         },
-        json={"ref": "main", "inputs": {"opp_ids": ",".join(opp_ids), "user_id": ""}},
+        json={"ref": "main", "inputs": {"opp_ids": ",".join(opp_ids), "user_id": "", "rescore": "false"}},
         timeout=15.0,
     )
     resp.raise_for_status()

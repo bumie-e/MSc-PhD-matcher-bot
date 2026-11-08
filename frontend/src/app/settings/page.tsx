@@ -1,11 +1,19 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { softInputClass, labelClass } from "@/components/AuthShell";
+import { Segmented, ScoreSlider, Switch } from "@/components/ui/Controls";
+import { FileDrop } from "@/components/ui/FileDrop";
+import { LlmKeyForm } from "@/components/ui/LlmKeyForm";
+import { Card, PageLoading, PageShell } from "@/components/ui/PageShell";
+import { TagInput } from "@/components/ui/TagInput";
+import { useCv } from "@/hooks/useCv";
+import { useLlmKey } from "@/hooks/useLlmKey";
 import { useProfile } from "@/hooks/useProfile";
 import { useSession } from "@/hooks/useSession";
+import { invokeFn } from "@/lib/functions";
 import { supabase } from "@/lib/supabase";
 import type { DegreeType } from "@/lib/types";
 
@@ -15,15 +23,28 @@ const DEGREE_OPTIONS: { value: DegreeType; label: string }[] = [
   { value: "both", label: "Both" },
 ];
 
+const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+function Message({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <p role="status" className="mb-4 rounded-lg bg-white px-4 py-3 text-base text-brand-deep">
+      {text}
+    </p>
+  );
+}
+
 export default function SettingsPage() {
   const { session, loading: sessionLoading } = useSession();
   const { profile, loading: profileLoading, updateProfile } = useProfile(session?.user.id);
+  const { llmKey, loading: keyLoading, refresh: refreshKey } = useLlmKey(session?.user.id);
+  const { cv, refresh: refreshCv } = useCv(session?.user.id);
   const router = useRouter();
 
   const [fieldOfStudy, setFieldOfStudy] = useState("");
-  const [keywordsInput, setKeywordsInput] = useState("");
-  const [countriesInput, setCountriesInput] = useState("");
-  const [universitiesInput, setUniversitiesInput] = useState("");
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [countries, setCountries] = useState<string[]>([]);
+  const [universities, setUniversities] = useState<string[]>([]);
   const [degreeType, setDegreeType] = useState<DegreeType>("both");
   const [fundingRequired, setFundingRequired] = useState(false);
   const [minScore, setMinScore] = useState(40);
@@ -42,9 +63,9 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!profile) return;
     setFieldOfStudy(profile.field_of_study ?? "");
-    setKeywordsInput(profile.keywords.join(", "));
-    setCountriesInput(profile.target_countries.join(", "));
-    setUniversitiesInput(profile.target_universities.join(", "));
+    setKeywords(profile.keywords);
+    setCountries(profile.target_countries);
+    setUniversities(profile.target_universities);
     setDegreeType(profile.degree_type);
     setFundingRequired(profile.funding_required);
     setMinScore(profile.min_score_threshold);
@@ -55,50 +76,49 @@ export default function SettingsPage() {
   }, [sessionLoading, session, router]);
 
   const interestsChanged =
-    profile &&
+    !!profile &&
     (fieldOfStudy !== (profile.field_of_study ?? "") ||
-      keywordsInput !== profile.keywords.join(", ") ||
-      countriesInput !== profile.target_countries.join(", ") ||
-      universitiesInput !== profile.target_universities.join(", "));
+      !same(keywords, profile.keywords) ||
+      !same(countries, profile.target_countries) ||
+      !same(universities, profile.target_universities));
+
+  const dirty =
+    interestsChanged ||
+    (!!profile && (degreeType !== profile.degree_type || fundingRequired !== profile.funding_required || minScore !== profile.min_score_threshold));
 
   const handleSave = async () => {
     setSaving(true);
     setSaveMessage(null);
 
-    const keywords = keywordsInput.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 10);
-    const target_countries = countriesInput.split(",").map((c) => c.trim()).filter(Boolean).slice(0, 15);
-    const target_universities = universitiesInput.split(",").map((u) => u.trim()).filter(Boolean);
-
-    const { error } = (await updateProfile({
-      field_of_study: fieldOfStudy || null,
-      keywords,
-      target_countries,
-      target_universities,
-      degree_type: degreeType,
-      funding_required: fundingRequired,
-      min_score_threshold: minScore,
-    })) ?? {};
+    const { error } =
+      (await updateProfile({
+        field_of_study: fieldOfStudy || null,
+        keywords,
+        target_countries: countries,
+        target_universities: universities,
+        degree_type: degreeType,
+        funding_required: fundingRequired,
+        min_score_threshold: minScore,
+      })) ?? {};
 
     if (error) {
-      setSaveMessage("Failed to save — please try again.");
+      setSaveMessage("Your changes did not save. Check your connection and try again.");
       setSaving(false);
       return;
     }
 
-    // Interests/countries/universities feed the search agent's queries —
-    // re-run it so new preferences take effect without waiting for tomorrow's
-    // cron. A pure threshold change needs no re-search: the dashboard
-    // already filters existing matches by profile.min_score_threshold live.
+    // Interests, countries and universities feed the search agent's queries, so
+    // re-run it to apply them now. A threshold change needs no re-search: the
+    // dashboard already filters existing matches by min_score_threshold.
     if (interestsChanged) {
       const { data: sessionData } = await supabase.auth.getSession();
       await supabase.functions.invoke("run-search", {
         headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
       });
-      setSaveMessage("Saved — searching for new opportunities based on your updated interests.");
+      setSaveMessage("Saved. We are searching for new opportunities based on your updated interests.");
     } else {
       setSaveMessage("Saved.");
     }
-
     setSaving(false);
   };
 
@@ -115,19 +135,16 @@ export default function SettingsPage() {
       return;
     }
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const { error: fnError } = await supabase.functions.invoke("upload-cv", {
-      body: { storage_path: storagePath, filename: cvFile.name },
-      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
-    });
+    const { error: fnError } = await invokeFn("upload-cv", { storage_path: storagePath, filename: cvFile.name });
 
     setCvUploading(false);
-    setCvFile(null);
     if (fnError) {
-      setCvMessage(`Upload failed: ${fnError.message}`);
+      setCvMessage(fnError);
       return;
     }
-    setCvMessage("CV uploaded — re-parsing and re-matching now.");
+    setCvFile(null);
+    setCvMessage("CV uploaded. We are reading it with your AI key and will re-score your matches.");
+    refreshCv();
   };
 
   const handleLinkedinSave = async () => {
@@ -143,176 +160,87 @@ export default function SettingsPage() {
 
     setLinkedinSaving(false);
     if (error) {
-      setLinkedinMessage(`Failed to save: ${error.message}`);
+      setLinkedinMessage(`Could not save the cookie: ${error.message}`);
       return;
     }
     setLinkedinCookie("");
-    setLinkedinMessage("Saved — the search agent will scan your LinkedIn feed on its next run.");
+    setLinkedinMessage("Saved. The search will scan your LinkedIn feed on its next run.");
   };
 
-  if (sessionLoading || profileLoading || !session) {
-    return (
-      <main className="flex min-h-screen items-center justify-center text-muted">
-        <p>Loading…</p>
-      </main>
-    );
-  }
+  if (sessionLoading || profileLoading || keyLoading || !session) return <PageLoading />;
 
   return (
-    <main className="mx-auto max-w-lg px-6 py-10">
-      <Link href="/dashboard" className="mb-6 inline-block text-sm text-muted hover:text-ink">
-        ← Back to dashboard
-      </Link>
+    <PageShell active="/settings" isAdmin={profile?.is_admin} title="Settings" subtitle="Change what we search for and which matches you see. Updates apply to your next search." width="max-w-3xl">
+      <Card id="ai" title="Your AI key" description="Personalised matching runs on your own key from Groq, OpenAI or Anthropic. Browsing and saving openings never needs one.">
+        <LlmKeyForm llmKey={llmKey} onChanged={() => { refreshKey(); refreshCv(); }} />
+      </Card>
 
-      <h1 className="mb-1 font-serif text-2xl font-semibold text-ink">Settings</h1>
-      <p className="mb-8 text-sm text-muted">
-        Update your interests, target schools, and match threshold any time.
-      </p>
-
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">
-          Research interests & field
-        </h2>
-
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
+      <Card title="What you study" description="These words drive every search.">
+        <label htmlFor="field" className={labelClass}>
           Field of study
         </label>
-        <input
-          value={fieldOfStudy}
-          onChange={(e) => setFieldOfStudy(e.target.value)}
-          placeholder="Machine Learning"
-          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
+        <input id="field" value={fieldOfStudy} onChange={(e) => setFieldOfStudy(e.target.value)} placeholder="Machine learning" className={softInputClass} />
+        <TagInput id="keywords" label="Keywords" hint="Press Enter or comma after each one." value={keywords} onChange={setKeywords} max={10} placeholder="federated learning, privacy" />
+      </Card>
 
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-          Keywords (up to 10, comma-separated)
-        </label>
-        <input
-          value={keywordsInput}
-          onChange={(e) => setKeywordsInput(e.target.value)}
-          placeholder="federated learning, privacy-preserving ML, NeurIPS"
-          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-      </section>
+      <Card title="Where you want to study" description="Leave universities empty to search everywhere in your countries.">
+        <TagInput id="countries" label="Countries" hint="Press Enter or comma after each one." value={countries} onChange={setCountries} max={15} placeholder="Germany, Netherlands, Canada" />
+        <TagInput id="universities" label="Specific universities (optional)" hint="We search their own pages too." value={universities} onChange={setUniversities} placeholder="ETH Zurich, TU Munich" />
+      </Card>
 
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">
-          Target countries & universities
-        </h2>
+      <Card title="What you are looking for">
+        <Segmented label="Degree type" options={DEGREE_OPTIONS} value={degreeType} onChange={setDegreeType} />
+        <Switch label="Funded positions only" hint="Hide openings that list no funding." checked={fundingRequired} onChange={setFundingRequired} />
+        <ScoreSlider value={minScore} onChange={setMinScore} />
+      </Card>
 
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-          Target countries (up to 15, comma-separated)
-        </label>
-        <input
-          value={countriesInput}
-          onChange={(e) => setCountriesInput(e.target.value)}
-          placeholder="Germany, Netherlands, Canada"
-          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-          Specific universities (optional, comma-separated)
-        </label>
-        <input
-          value={universitiesInput}
-          onChange={(e) => setUniversitiesInput(e.target.value)}
-          placeholder="ETH Zurich, TU Munich"
-          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-      </section>
-
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">
-          Degree type & threshold
-        </h2>
-
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Degree type</label>
-        <div className="mb-4 flex gap-2">
-          {DEGREE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setDegreeType(opt.value)}
-              className={`flex-1 rounded border px-3 py-2 text-sm ${
-                degreeType === opt.value ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+      {/* Appears once something changes; stays reachable on long phone screens. */}
+      {(dirty || saveMessage) && (
+        <div className="anim-rise sticky bottom-3 z-10 mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-brand p-4 text-white shadow-[0_12px_30px_-10px_rgba(0,30,100,0.6)]">
+          <p role="status" className="min-w-0 flex-1 text-lg">
+            {saveMessage ?? "You have unsaved changes."}
+          </p>
+          <button onClick={handleSave} disabled={saving || !dirty} className="rounded-lg bg-white px-6 py-2.5 text-lg font-bold text-brand transition-colors hover:bg-brand-soft disabled:opacity-60">
+            {saving ? "Saving..." : "Save changes"}
+          </button>
         </div>
+      )}
 
-        <label className="mb-4 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={fundingRequired} onChange={(e) => setFundingRequired(e.target.checked)} />
-          Funded positions only
-        </label>
-
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-          Minimum match score to show ({minScore})
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={minScore}
-          onChange={(e) => setMinScore(Number(e.target.value))}
-          className="w-full"
-        />
-      </section>
-
-      {saveMessage && <p className="mb-4 text-sm text-accent">{saveMessage}</p>}
-
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="mb-8 w-full rounded bg-accent py-2 text-sm font-medium text-white disabled:opacity-50"
-      >
-        {saving ? "Saving…" : "Save changes"}
-      </button>
-
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">Re-upload CV</h2>
-        <p className="mb-4 text-sm text-muted">
-          Replacing your CV re-parses it and re-scores every opportunity against the new content.
-        </p>
-        <input
-          type="file"
-          accept="application/pdf"
-          onChange={(e) => setCvFile(e.target.files?.[0] ?? null)}
-          className="mb-4 block w-full text-sm"
-        />
-        {cvMessage && <p className="mb-4 text-sm text-accent">{cvMessage}</p>}
-        <button
-          onClick={handleCvUpload}
-          disabled={!cvFile || cvUploading}
-          className="w-full rounded border border-accent py-2 text-sm font-medium text-accent disabled:opacity-50"
-        >
-          {cvUploading ? "Uploading…" : "Upload new CV"}
+      <Card title={cv ? "Replace your CV" : "Upload your CV"} description="We read it with your AI key, then re-score openings against it.">
+        {cv && (
+          <p className="mb-4 rounded-lg bg-white px-4 py-3 text-base" role="status">
+            {cv.filename}:{" "}
+            {cv.parse_status === "done" ? "read and ready" : cv.parse_status === "pending" ? "being read now" : cv.parse_error ?? "could not be read"}
+          </p>
+        )}
+        {llmKey?.status !== "valid" && (
+          <p className="mb-4 rounded-lg bg-white px-4 py-3 text-base font-bold">Connect your AI key above before uploading a CV.</p>
+        )}
+        <FileDrop file={cvFile} onFile={setCvFile} disabled={cvUploading || llmKey?.status !== "valid"} />
+        <Message text={cvMessage} />
+        <button onClick={handleCvUpload} disabled={!cvFile || cvUploading || llmKey?.status !== "valid"} className="w-full rounded-xl bg-brand py-3 text-lg font-bold text-white transition-colors hover:bg-brand-deep disabled:opacity-50 sm:w-auto sm:px-8">
+          {cvUploading ? "Uploading..." : "Upload new CV"}
         </button>
-      </section>
+      </Card>
 
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">LinkedIn</h2>
-        <p className="mb-4 text-sm text-muted">
-          Paste your <code className="rounded bg-surface-2 px-1 py-0.5">li_at</code> session cookie so the search
-          agent can scan hashtagged posts from your feed. It&apos;s encrypted at rest and never shown again once
-          saved.
-        </p>
-        <input
-          type="password"
-          value={linkedinCookie}
-          onChange={(e) => setLinkedinCookie(e.target.value)}
-          placeholder="li_at cookie value"
-          className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-        {linkedinMessage && <p className="mb-4 text-sm text-accent">{linkedinMessage}</p>}
-        <button
-          onClick={handleLinkedinSave}
-          disabled={!linkedinCookie.trim() || linkedinSaving}
-          className="w-full rounded border border-accent py-2 text-sm font-medium text-accent disabled:opacity-50"
-        >
-          {linkedinSaving ? "Saving…" : "Save cookie"}
+      <Card title="LinkedIn" description="Optional. Add your session cookie and the search also scans hashtag posts from your feed.">
+        <ol className="mb-5 list-decimal space-y-1 pl-6 text-base text-black/80">
+          <li>Sign in to LinkedIn in your browser.</li>
+          <li>Open developer tools, then Application, then Cookies.</li>
+          <li>
+            Copy the value of the <code className="rounded bg-white px-1.5 py-0.5">li_at</code> cookie and paste it below.
+          </li>
+        </ol>
+        <label htmlFor="li-at" className={labelClass}>
+          li_at cookie
+        </label>
+        <input id="li-at" type="password" autoComplete="off" value={linkedinCookie} onChange={(e) => setLinkedinCookie(e.target.value)} placeholder="Paste the cookie value" className={softInputClass} />
+        <p className="-mt-3 mb-5 text-sm text-black/60">It is encrypted when stored and never shown again.</p>
+        <Message text={linkedinMessage} />
+        <button onClick={handleLinkedinSave} disabled={!linkedinCookie.trim() || linkedinSaving} className="w-full rounded-xl bg-brand py-3 text-lg font-bold text-white transition-colors hover:bg-brand-deep disabled:opacity-50 sm:w-auto sm:px-8">
+          {linkedinSaving ? "Saving..." : "Save cookie"}
         </button>
-      </section>
-    </main>
+      </Card>
+    </PageShell>
   );
 }

@@ -14,21 +14,19 @@ Flow:
      profiles via Tavily, then Playwright-check each one for hiring
      signals, caching visited profiles in lab_visits.
   4. Drop listings whose source_url is already in `opportunities`.
-  5. Ask Groq to normalize each new listing into the opportunities schema.
+  5. Ask the owner's Groq model to normalize each new listing into the
+     opportunities schema (shared pool; personalised scoring is per-user, in
+     agents/matching, with each user's own key).
   6. Write the structured rows to Supabase.
 
-Groq is used for structuring (step 5), not for driving the scrape itself.
+The LLM is used for structuring (step 5), not for driving the scrape itself.
 """
 
-import json
 import sys
 
-import openai
-
 from agents import run_log
-from agents.llm import get_groq_client
+from agents.llm import LLM, LLMError, get_owner_llm
 from agents.search import tools
-from config import settings
 
 STRUCTURE_SYSTEM_PROMPT = """You turn a raw scraped PhD/MSc listing into structured JSON.
 
@@ -65,8 +63,7 @@ they're discarded. If a field can't be determined from the text, use null
 invent a deadline."""
 
 
-def structure_listing(listing: dict) -> dict | None:
-    client = get_groq_client()
+def structure_listing(listing: dict, llm: LLM) -> dict | None:
     user_content = (
         f"Title: {listing['title']}\n"
         f"University (as scraped): {listing.get('university', '')}\n"
@@ -74,33 +71,14 @@ def structure_listing(listing: dict) -> dict | None:
         f"URL: {listing['source_url']}"
     )
     try:
-        resp = client.chat.completions.create(
-            model=settings.SEARCH_MODEL,
-            messages=[
-                {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=4096,
-            # See agents/cv/parser.py structure_cv_text for why this is needed.
-            extra_body={"reasoning_effort": "low"},
-        )
-    except openai.APIError as exc:
-        # A single malformed/truncated generation (Groq validates JSON
-        # server-side and 400s on it) must not take down the whole run —
-        # skip this listing and keep going.
-        print(f"Groq structuring failed for {listing.get('source_url')}: {exc}")
-        return None
+        structured = llm.complete_json(STRUCTURE_SYSTEM_PROMPT, user_content)
+    except LLMError as exc:
+        # The owner key is shared by everyone, so a rejected key or a rate limit
+        # is a run-level problem. Let it surface instead of skipping every listing.
+        raise RuntimeError(f"Shared search LLM unavailable: {exc}") from exc
 
-    try:
-        structured = json.loads(resp.choices[0].message.content)
-    except (json.JSONDecodeError, TypeError, IndexError):
-        return None
-
-    if not isinstance(structured, dict):
-        # Groq occasionally wraps/returns a bare JSON array even under
-        # json_object mode — treat as a malformed generation, not a crash.
-        print(f"Groq returned non-object JSON for {listing.get('source_url')}, skipping.")
+    if structured is None:
+        print(f"Unusable structuring output for {listing.get('source_url')}, skipping.")
         return None
 
     if not structured.pop("is_opportunity", True):
@@ -111,17 +89,15 @@ def structure_listing(listing: dict) -> dict | None:
     structured["source_name"] = listing["source_name"]
     if listing["source_name"] == "researchgate":
         # ResearchGate profiles are individual academics, never funded MSc
-        # programs — don't let a borderline Groq read mislabel this as msc.
+        # programs, so don't let a borderline read mislabel this as msc.
         structured["type"] = "phd"
     return structured
 
 
 def run() -> list[str]:
+    # The pool is shared and browsable without an account setup, so the search
+    # runs even when nobody has filled in interests yet (default keywords).
     user_rows = tools.get_all_user_keywords()
-    if not user_rows:
-        print("No onboarded users yet — nothing to search for.")
-        return []
-
     keywords = tools.collect_global_keywords(user_rows)
     print(f"Searching {len(keywords)} keyword(s) across all global sources: {keywords}")
 
@@ -167,9 +143,10 @@ def run() -> list[str]:
     new_listings = [listing for listing in deduped_by_url if listing["source_url"] not in existing_urls]
     print(f"{len(new_listings)} are new (not already in opportunities).")
 
+    llm = get_owner_llm() if new_listings else None
     structured_opportunities = []
     for listing in new_listings:
-        structured = structure_listing(listing)
+        structured = structure_listing(listing, llm)
         if structured:
             structured_opportunities.append(structured)
 

@@ -1,198 +1,46 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect } from "react";
 
-import { DetailDrawer } from "@/components/DetailDrawer";
-import { OpportunityCard } from "@/components/OpportunityCard";
-import { OpportunityListRow } from "@/components/OpportunityListRow";
+import { DashboardView } from "@/components/dashboard/DashboardView";
+import { PageLoading } from "@/components/ui/PageShell";
 import { useAllOpportunities } from "@/hooks/useAllOpportunities";
+import { useCv } from "@/hooks/useCv";
+import { useLlmKey } from "@/hooks/useLlmKey";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useProfile } from "@/hooks/useProfile";
 import { useSession } from "@/hooks/useSession";
-import { supabase } from "@/lib/supabase";
-import type { MatchWithOpportunity, OpportunityType } from "@/lib/types";
-
-type SortKey = "score" | "deadline";
 
 export default function DashboardPage() {
   const { session, loading: sessionLoading } = useSession();
   const { profile } = useProfile(session?.user.id);
-  const { matches, loading, upsertNote } = useOpportunities(session?.user.id);
-  const { opportunities: allOpportunities, loading: allLoading, hasMore, loadMore } = useAllOpportunities();
+  const { items, loading, upsertNote, removeNote } = useOpportunities(session?.user.id);
+  const { opportunities, loading: poolLoading, hasMore, loadMore } = useAllOpportunities();
+  const { llmKey } = useLlmKey(session?.user.id);
+  const { cv } = useCv(session?.user.id);
   const router = useRouter();
-
-  const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
-  const [sortKey, setSortKey] = useState<SortKey>("score");
-  const [selected, setSelected] = useState<MatchWithOpportunity | null>(null);
 
   useEffect(() => {
     if (!sessionLoading && !session) router.replace("/login");
   }, [sessionLoading, session, router]);
 
-  const threshold = profile?.min_score_threshold ?? 0;
-
-  const visibleMatches = useMemo(() => {
-    let list = matches.filter((m) => m.score >= threshold);
-    if (typeFilter !== "all") list = list.filter((m) => m.opportunity.type === typeFilter);
-
-    return [...list].sort((a, b) => {
-      if (sortKey === "score") return b.score - a.score;
-      const aDate = a.opportunity.deadline ? new Date(a.opportunity.deadline).getTime() : Infinity;
-      const bDate = b.opportunity.deadline ? new Date(b.opportunity.deadline).getTime() : Infinity;
-      return aDate - bDate;
-    });
-  }, [matches, threshold, typeFilter, sortKey]);
-
-  const scoreByOpportunityId = useMemo(() => {
-    const map = new Map<string, number>();
-    matches.forEach((m) => map.set(m.opportunity_id, m.score));
-    return map;
-  }, [matches]);
-
-  if (sessionLoading || !session) {
-    return (
-      <main className="flex min-h-screen items-center justify-center text-muted">
-        <p>Loading…</p>
-      </main>
-    );
-  }
+  if (sessionLoading || !session) return <PageLoading text="Loading your dashboard..." />;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="font-serif text-2xl font-semibold text-ink">Your opportunities</h1>
-          <p className="text-sm text-muted">{visibleMatches.length} matching your threshold</p>
-        </div>
-        <div className="flex items-center gap-4">
-          {profile?.is_admin && (
-            <Link href="/admin" className="text-sm text-muted hover:text-ink">
-              Admin
-            </Link>
-          )}
-          <Link href="/pipeline" className="text-sm text-muted hover:text-ink">
-            Pipeline
-          </Link>
-          <Link href="/settings" className="text-sm text-muted hover:text-ink">
-            Settings
-          </Link>
-          <button
-            onClick={() => supabase.auth.signOut().then(() => router.replace("/login"))}
-            className="text-sm text-muted hover:text-ink"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {profile && profile.onboarding_step < 5 && (
-        <section className="mb-8 flex flex-col items-start justify-between gap-4 rounded-2xl bg-brand p-6 text-white sm:flex-row sm:items-center">
-          <div>
-            <h2 className="text-xl font-bold">Get started by uploading your CV</h2>
-            <p className="mt-1 max-w-xl text-base text-white/90">
-              Your matches appear here once we know your background. Setup takes about five minutes, and the search runs daily after that.
-            </p>
-          </div>
-          <Link href="/onboarding" className="shrink-0 rounded-lg bg-white px-5 py-3 font-bold text-brand hover:bg-brand-soft">
-            Upload your CV
-          </Link>
-        </section>
-      )}
-
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        {(["all", "phd", "msc"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTypeFilter(t)}
-            className={`rounded border px-3 py-1 text-xs uppercase ${
-              typeFilter === t ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-        <span className="mx-2 text-border">|</span>
-        <button
-          onClick={() => setSortKey("score")}
-          className={`rounded border px-3 py-1 text-xs ${
-            sortKey === "score" ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
-          }`}
-        >
-          Sort: score
-        </button>
-        <button
-          onClick={() => setSortKey("deadline")}
-          className={`rounded border px-3 py-1 text-xs ${
-            sortKey === "deadline" ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
-          }`}
-        >
-          Sort: deadline
-        </button>
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-muted">Loading opportunities…</p>
-      ) : visibleMatches.length === 0 ? (
-        <p className="text-sm text-muted">
-          No matches yet. {profile && profile.onboarding_step < 5 ? "Upload your CV above to get started." : "The search agent runs daily. Check back soon, or lower your minimum score threshold in Settings."}
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleMatches.map((match) => (
-            <OpportunityCard key={match.id} match={match} onClick={() => setSelected(match)} />
-          ))}
-        </div>
-      )}
-
-      {selected && (
-        <DetailDrawer
-          match={selected}
-          onClose={() => setSelected(null)}
-          onSaveNote={async (patch) => {
-            const result = await upsertNote(selected.opportunity_id, patch);
-            if (result?.data) setSelected({ ...selected, user_note: result.data });
-          }}
-        />
-      )}
-
-      <hr className="my-10 border-border" />
-
-      <section>
-        <h2 className="mb-1 font-serif text-xl font-semibold text-ink">All discovered opportunities</h2>
-        <p className="mb-4 text-sm text-muted">
-          Everything the daily search has found so far, regardless of your match score.
-        </p>
-
-        {allLoading ? (
-          <p className="text-sm text-muted">Loading…</p>
-        ) : allOpportunities.length === 0 ? (
-          <p className="text-sm text-muted">
-            Nothing found yet — the search agent runs daily, or you can trigger it from Settings.
-          </p>
-        ) : (
-          <>
-            <div className="overflow-hidden rounded-lg border border-border bg-surface">
-              {allOpportunities.map((opp) => (
-                <OpportunityListRow
-                  key={opp.id}
-                  opportunity={opp}
-                  score={scoreByOpportunityId.get(opp.id) ?? null}
-                />
-              ))}
-            </div>
-            {hasMore && (
-              <button
-                onClick={loadMore}
-                className="mt-3 w-full rounded border border-border py-2 text-sm text-muted hover:text-ink"
-              >
-                Load more
-              </button>
-            )}
-          </>
-        )}
-      </section>
-    </main>
+    <DashboardView
+      email={session.user.email}
+      profile={profile}
+      items={items}
+      itemsLoading={loading}
+      upsertNote={upsertNote}
+      removeNote={removeNote}
+      pool={opportunities}
+      poolLoading={poolLoading}
+      hasMore={hasMore}
+      loadMore={loadMore}
+      llmKey={llmKey}
+      cv={cv}
+    />
   );
 }

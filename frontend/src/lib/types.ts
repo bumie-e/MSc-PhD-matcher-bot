@@ -72,3 +72,33 @@ export interface MatchWithOpportunity extends Match {
   opportunity: Opportunity;
   user_note: UserNote | null;
 }
+
+export type LlmProvider = "groq" | "openai" | "anthropic";
+
+// Status of the user's own AI key. The ciphertext itself is never readable from the browser.
+export interface UserLlmKey {
+  user_id: string;
+  provider: LlmProvider;
+  model: string;
+  available_models: string[];
+  status: "valid" | "invalid" | "model_unavailable";
+  status_message: string | null;
+  validated_at: string;
+}
+
+export interface UserCv {
+  id: string;
+  filename: string;
+  parse_status: ParseStatus;
+  parse_error: string | null;
+  updated_at: string;
+}
+
+// Anything the user can see or track. `match` exists only after personalised
+// scoring has run; `user_note` exists once the user saves or tracks it.
+export interface OpportunityItem {
+  id: string; // the opportunity id
+  opportunity: Opportunity;
+  match: Match | null;
+  user_note: UserNote | null;
+}

@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { softInputClass, labelClass } from "@/components/AuthShell";
+import { Card, PageLoading, PageShell } from "@/components/ui/PageShell";
 import { useProfile } from "@/hooks/useProfile";
 import { useSession } from "@/hooks/useSession";
 import { supabase } from "@/lib/supabase";
@@ -31,11 +32,13 @@ interface AgentRun {
   error: string | null;
 }
 
-const STATUS_TONE: Record<RunStatus, string> = {
-  running: "text-signal",
-  success: "text-signal-green",
-  error: "text-red-700",
+const STATUS_CHIP: Record<RunStatus, string> = {
+  running: "bg-brand-mid text-brand-deep",
+  success: "bg-brand text-white",
+  error: "border-2 border-black bg-white text-black",
 };
+
+const STATUS_LABEL: Record<RunStatus, string> = { running: "Running", success: "Succeeded", error: "Failed" };
 
 function formatDuration(startedAt: string, finishedAt: string | null): string {
   if (!finishedAt) return "in progress";
@@ -67,11 +70,7 @@ export default function AdminPage() {
 
   const refreshRuns = useCallback(async () => {
     setRunsLoading(true);
-    const { data } = await supabase
-      .from("agent_runs")
-      .select("*")
-      .order("started_at", { ascending: false })
-      .limit(30);
+    const { data } = await supabase.from("agent_runs").select("*").order("started_at", { ascending: false }).limit(30);
     setRuns((data as AgentRun[]) ?? []);
     setRunsLoading(false);
   }, []);
@@ -91,7 +90,8 @@ export default function AdminPage() {
     }
   }, [profile, refreshInvites, refreshRuns]);
 
-  const handleSendInvite = async () => {
+  const handleSendInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!email.trim()) return;
     setSending(true);
     setMessage(null);
@@ -104,7 +104,7 @@ export default function AdminPage() {
 
     setSending(false);
     if (error) {
-      setMessage(`Failed: ${error.message}`);
+      setMessage(`Could not send the invite: ${error.message}`);
       return;
     }
     setEmail("");
@@ -117,112 +117,86 @@ export default function AdminPage() {
     refreshInvites();
   };
 
-  if (sessionLoading || profileLoading || !session || !profile?.is_admin) {
-    return (
-      <main className="flex min-h-screen items-center justify-center text-muted">
-        <p>Loading…</p>
-      </main>
-    );
-  }
+  if (sessionLoading || profileLoading || !session || !profile?.is_admin) return <PageLoading />;
+
+  const failed = runs.filter((r) => r.status === "error").length;
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <Link href="/dashboard" className="mb-6 inline-block text-sm text-muted hover:text-ink">
-        ← Back to dashboard
-      </Link>
-
-      <h1 className="mb-1 font-serif text-2xl font-semibold text-ink">Invite manager</h1>
-      <p className="mb-8 text-sm text-muted">Signup is invite-only. Create and revoke invites here.</p>
-
-      <section className="mb-8 rounded-lg border border-border bg-surface p-6">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">Send an invite</h2>
-        <div className="flex gap-2">
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="friend@example.com"
-            className="flex-1 rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <button
-            onClick={handleSendInvite}
-            disabled={!email.trim() || sending}
-            className="rounded bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {sending ? "Sending…" : "Invite"}
-          </button>
-        </div>
-        {message && <p className="mt-3 break-all text-sm text-accent">{message}</p>}
-      </section>
-
-      <section className="rounded-lg border border-border bg-surface">
-        <h2 className="border-b border-border p-4 text-xs font-semibold uppercase tracking-wide text-muted">
-          All invites
-        </h2>
-        {invitesLoading ? (
-          <p className="p-4 text-sm text-muted">Loading…</p>
-        ) : invites.length === 0 ? (
-          <p className="p-4 text-sm text-muted">No invites yet.</p>
+    <PageShell active="/admin" isAdmin title="Admin" subtitle="Watch the search and match agents, and send optional invites. Anyone can sign up without one." width="max-w-4xl">
+      <Card
+        title="Agent runs"
+        description={runsLoading ? "Loading recent runs..." : runs.length === 0 ? "Nothing has run yet." : failed > 0 ? `${failed} of the last ${runs.length} runs failed.` : `The last ${runs.length} runs all finished without errors.`}
+      >
+        <button onClick={refreshRuns} className="mb-4 rounded-lg bg-white px-4 py-2 text-base font-bold text-brand transition-colors hover:bg-brand-mid">
+          Refresh
+        </button>
+        {runsLoading ? (
+          <div className="space-y-2" aria-busy="true">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="skeleton h-16 rounded-2xl" />
+            ))}
+          </div>
         ) : (
-          invites.map((invite) => {
+          <ul className="space-y-2">
+            {runs.map((run) => (
+              <li key={run.id} className="rounded-2xl bg-white p-4">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="text-lg font-bold capitalize">{run.agent.replace("_", " ")}</span>
+                  <span className={`rounded-full px-3 py-0.5 text-sm font-bold ${STATUS_CHIP[run.status]}`}>{STATUS_LABEL[run.status]}</span>
+                  <span className="text-base text-black/70">
+                    {new Date(run.started_at).toLocaleString()}, {formatDuration(run.started_at, run.finished_at)}
+                  </span>
+                </div>
+                {Object.keys(run.summary).length > 0 && <p className="mt-1 break-words text-sm text-black/70">{JSON.stringify(run.summary)}</p>}
+                {run.error && <p className="mt-2 break-words rounded-lg bg-brand-soft px-3 py-2 text-sm font-bold text-black">{run.error}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="Invite someone" description="Optional. Sends a signup link to this email address.">
+        <form onSubmit={handleSendInvite}>
+          <label htmlFor="invite-email" className={labelClass}>
+            Email address
+          </label>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <input id="invite-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="friend@example.com" className={`${softInputClass} sm:mb-0 sm:flex-1`} />
+            <button type="submit" disabled={!email.trim() || sending} className="rounded-xl bg-brand px-7 py-3 text-lg font-bold text-white transition-colors hover:bg-brand-deep disabled:opacity-50">
+              {sending ? "Sending..." : "Send invite"}
+            </button>
+          </div>
+        </form>
+        {message && (
+          <p role="status" className="mt-4 break-all rounded-lg bg-white px-4 py-3 text-base text-brand-deep">
+            {message}
+          </p>
+        )}
+      </Card>
+
+      <Card title="All invites" description={invitesLoading ? "Loading..." : invites.length === 0 ? "No invites yet." : undefined}>
+        <ul className="space-y-2">
+          {invites.map((invite) => {
             const expired = new Date(invite.expires_at).getTime() < Date.now();
+            const state = invite.used_at ? "Used" : expired ? "Expired" : "Pending";
             return (
-              <div
-                key={invite.id}
-                className="flex items-center justify-between gap-3 border-b border-border p-4 text-sm last:border-b-0"
-              >
+              <li key={invite.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4">
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-ink">{invite.email}</p>
-                  <p className="font-mono text-xs text-muted">
-                    {invite.used_at ? "Used" : expired ? "Expired" : "Pending"} · created{" "}
-                    {new Date(invite.created_at).toLocaleDateString()}
+                  <p className="break-all text-lg font-bold">{invite.email}</p>
+                  <p className="text-base text-black/70">
+                    {state}, created {new Date(invite.created_at).toLocaleDateString()}
                   </p>
                 </div>
                 {!invite.used_at && (
-                  <button
-                    onClick={() => handleRevoke(invite.id)}
-                    className="shrink-0 rounded border border-border px-3 py-1 text-xs text-muted hover:border-signal hover:text-signal"
-                  >
+                  <button onClick={() => handleRevoke(invite.id)} className="rounded-lg border-2 border-brand px-4 py-1.5 text-base font-bold text-brand transition-colors hover:bg-brand hover:text-white">
                     Revoke
                   </button>
                 )}
-              </div>
+              </li>
             );
-          })
-        )}
-      </section>
-
-      <section className="mt-8 rounded-lg border border-border bg-surface">
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Agent run log</h2>
-          <button onClick={refreshRuns} className="text-xs text-muted hover:text-ink">
-            Refresh
-          </button>
-        </div>
-        {runsLoading ? (
-          <p className="p-4 text-sm text-muted">Loading…</p>
-        ) : runs.length === 0 ? (
-          <p className="p-4 text-sm text-muted">No runs recorded yet.</p>
-        ) : (
-          runs.map((run) => (
-            <div
-              key={run.id}
-              className="flex items-center justify-between gap-3 border-b border-border p-4 text-sm last:border-b-0"
-            >
-              <div className="min-w-0">
-                <p className="font-medium capitalize text-ink">
-                  {run.agent.replace("_", " ")}{" "}
-                  <span className={`font-mono text-xs uppercase ${STATUS_TONE[run.status]}`}>{run.status}</span>
-                </p>
-                <p className="truncate font-mono text-xs text-muted">
-                  {new Date(run.started_at).toLocaleString()} · {formatDuration(run.started_at, run.finished_at)}
-                  {Object.keys(run.summary).length > 0 && ` · ${JSON.stringify(run.summary)}`}
-                </p>
-                {run.error && <p className="mt-1 truncate text-xs text-red-700">{run.error}</p>}
-              </div>
-            </div>
-          ))
-        )}
-      </section>
-    </main>
+          })}
+        </ul>
+      </Card>
+    </PageShell>
   );
 }

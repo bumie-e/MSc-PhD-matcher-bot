@@ -1,87 +1,141 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { buttonClass, labelClass, softInputClass } from "@/components/AuthShell";
+import { Segmented, ScoreSlider, Switch } from "@/components/ui/Controls";
+import { FileDrop } from "@/components/ui/FileDrop";
+import { LlmKeyForm } from "@/components/ui/LlmKeyForm";
+import { PageLoading } from "@/components/ui/PageShell";
+import { TagInput } from "@/components/ui/TagInput";
+import { useCv } from "@/hooks/useCv";
+import { useLlmKey } from "@/hooks/useLlmKey";
 import { useProfile } from "@/hooks/useProfile";
+import { invokeFn } from "@/lib/functions";
 import { supabase } from "@/lib/supabase";
+import type { UserCv, UserLlmKey, UserProfile } from "@/lib/types";
 
-const DEGREE_OPTIONS: { value: "msc" | "phd" | "both"; label: string }[] = [
+type Degree = "msc" | "phd" | "both";
+
+const DEGREE_OPTIONS: { value: Degree; label: string }[] = [
   { value: "phd", label: "PhD" },
   { value: "msc", label: "MSc" },
   { value: "both", label: "Both" },
 ];
 
+// Step ids 2..5 are stored in user_profiles.onboarding_step; step 1 (the AI key)
+// lives in user_llm_keys, so existing users keep their progress.
+const STEPS = [
+  { id: 1, title: "Connect your AI", blurb: "Your own Groq, OpenAI or Anthropic key" },
+  { id: 2, title: "Upload your CV", blurb: "So we know your background" },
+  { id: 3, title: "Your interests", blurb: "What you want to study" },
+  { id: 4, title: "Where to study", blurb: "Countries and universities" },
+  { id: 5, title: "Preferences", blurb: "Degree, funding and score" },
+];
+
+// Waits for the saved state to load, so a returning user resumes where they left off.
 export function OnboardingWizard({ userId }: { userId: string }) {
-  const { profile, updateProfile } = useProfile(userId);
+  const { profile, loading: profileLoading, updateProfile } = useProfile(userId);
+  const { llmKey, loading: keyLoading, refresh: refreshKey } = useLlmKey(userId);
+  const { cv, loading: cvLoading, refresh: refreshCv } = useCv(userId);
+
+  if (profileLoading || keyLoading || cvLoading) return <PageLoading />;
+  return <Wizard userId={userId} profile={profile} updateProfile={updateProfile} llmKey={llmKey} refreshKey={refreshKey} cv={cv} refreshCv={refreshCv} />;
+}
+
+function firstIncompleteStep(profile: UserProfile | null, llmKey: UserLlmKey | null, cv: UserCv | null): number {
+  if (llmKey?.status !== "valid") return 1;
+  if (!cv || cv.parse_status === "error") return 2;
+  return Math.min(Math.max(profile?.onboarding_step ?? 3, 3), 5);
+}
+
+function Wizard({
+  userId,
+  profile,
+  updateProfile,
+  llmKey,
+  refreshKey,
+  cv,
+  refreshCv,
+}: {
+  userId: string;
+  profile: UserProfile | null;
+  updateProfile: ReturnType<typeof useProfile>["updateProfile"];
+  llmKey: UserLlmKey | null;
+  refreshKey: () => void;
+  cv: UserCv | null;
+  refreshCv: () => void;
+}) {
   const router = useRouter();
 
-  const [step, setStep] = useState(profile?.onboarding_step && profile.onboarding_step > 1 ? profile.onboarding_step : 2);
+  const [step, setStep] = useState(firstIncompleteStep(profile, llmKey, cv));
+  const [busy, setBusy] = useState(false);
 
-  // Step 2: CV
   const [cvFile, setCvFile] = useState<File | null>(null);
-  const [cvUploading, setCvUploading] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
 
-  // Step 3: interests
   const [fieldOfStudy, setFieldOfStudy] = useState(profile?.field_of_study ?? "");
-  const [keywordsInput, setKeywordsInput] = useState(profile?.keywords?.join(", ") ?? "");
-
-  // Step 4: countries
-  const [countriesInput, setCountriesInput] = useState(profile?.target_countries?.join(", ") ?? "");
-  const [universitiesInput, setUniversitiesInput] = useState(profile?.target_universities?.join(", ") ?? "");
-
-  // Step 5: degree & prefs
-  const [degreeType, setDegreeType] = useState<"msc" | "phd" | "both">(profile?.degree_type ?? "both");
+  const [keywords, setKeywords] = useState<string[]>(profile?.keywords ?? []);
+  const [countries, setCountries] = useState<string[]>(profile?.target_countries ?? []);
+  const [universities, setUniversities] = useState<string[]>(profile?.target_universities ?? []);
+  const [degreeType, setDegreeType] = useState<Degree>(profile?.degree_type ?? "both");
   const [fundingRequired, setFundingRequired] = useState(profile?.funding_required ?? false);
   const [minScore, setMinScore] = useState(profile?.min_score_threshold ?? 40);
 
+  const index = STEPS.findIndex((s) => s.id === step);
+  const current = STEPS[index];
+
+  // Never lowers saved progress: a returning user who revisits an earlier step keeps their finished status.
   const goNext = async (nextStep: number) => {
-    await updateProfile({ onboarding_step: nextStep });
+    if (nextStep >= 2) await updateProfile({ onboarding_step: Math.max(profile?.onboarding_step ?? 0, nextStep) });
     setStep(nextStep);
   };
 
+  // Going back only moves the screen; saved answers stay saved.
+  const goBack = () => setStep(STEPS[Math.max(index - 1, 0)].id);
+
   const handleCvUpload = async () => {
     if (!cvFile) return;
-    setCvUploading(true);
+    setBusy(true);
     setCvError(null);
 
     const storagePath = `${userId}/${Date.now()}-${cvFile.name}`;
     const { error: uploadError } = await supabase.storage.from("cvs").upload(storagePath, cvFile);
     if (uploadError) {
       setCvError(uploadError.message);
-      setCvUploading(false);
+      setBusy(false);
       return;
     }
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const { error: fnError } = await supabase.functions.invoke("upload-cv", {
-      body: { storage_path: storagePath, filename: cvFile.name },
-      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
-    });
-
-    setCvUploading(false);
+    const { error: fnError } = await invokeFn("upload-cv", { storage_path: storagePath, filename: cvFile.name });
     if (fnError) {
-      setCvError(fnError.message);
+      setCvError(fnError);
+      setBusy(false);
       return;
     }
+    refreshCv();
     await goNext(3);
+    setBusy(false);
   };
 
   const handleInterestsSubmit = async () => {
-    const keywords = keywordsInput.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 10);
+    setBusy(true);
     await updateProfile({ field_of_study: fieldOfStudy, keywords });
     await goNext(4);
+    setBusy(false);
   };
 
   const handleCountriesSubmit = async () => {
-    const target_countries = countriesInput.split(",").map((c) => c.trim()).filter(Boolean).slice(0, 15);
-    const target_universities = universitiesInput.split(",").map((u) => u.trim()).filter(Boolean);
-    await updateProfile({ target_countries, target_universities });
+    setBusy(true);
+    await updateProfile({ target_countries: countries, target_universities: universities });
     await goNext(5);
+    setBusy(false);
   };
 
   const handleFinish = async () => {
+    setBusy(true);
     await updateProfile({
       degree_type: degreeType,
       funding_required: fundingRequired,
@@ -89,153 +143,162 @@ export function OnboardingWizard({ userId }: { userId: string }) {
       onboarding_step: 5,
     });
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    await supabase.functions.invoke("run-search", {
-      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
-    });
+    // Refresh the shared pool with the new interests, then score for this user.
+    // If the CV is still being read, its own workflow starts scoring when it finishes.
+    await invokeFn("run-search");
+    if (llmKey?.status === "valid") await invokeFn("rematch-me");
 
     router.replace("/dashboard");
   };
 
   return (
-    <div className="mx-auto w-full max-w-lg rounded-lg border border-border bg-surface p-8">
-      <p className="mb-1 font-mono text-xs uppercase tracking-wide text-accent">Step {step - 1} of 4</p>
+    <div className="grid min-h-screen grid-rows-[auto_1fr] bg-brand-soft font-sans text-black md:grid-cols-[22rem_1fr] md:grid-rows-1">
+      {/* Progress: a sidebar on desktop, a bar on phones. */}
+      <aside className="bg-brand p-5 text-white md:flex md:flex-col md:justify-between md:p-10">
+        <div>
+          <Link href="/" className="text-lg font-bold md:text-xl">
+            MSc PhD Matcher
+          </Link>
 
-      {step === 2 && (
-        <section>
-          <h2 className="mb-2 font-serif text-xl font-semibold">Upload your CV</h2>
-          <p className="mb-4 text-sm text-muted">
-            We&apos;ll extract your education, experience, and skills automatically.
-          </p>
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setCvFile(e.target.files?.[0] ?? null)}
-            className="mb-4 block w-full text-sm"
-          />
-          {cvError && <p className="mb-4 text-sm text-red-600">{cvError}</p>}
-          <button
-            onClick={handleCvUpload}
-            disabled={!cvFile || cvUploading}
-            className="w-full rounded bg-accent py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {cvUploading ? "Uploading…" : "Next"}
-          </button>
-        </section>
-      )}
-
-      {step === 3 && (
-        <section>
-          <h2 className="mb-2 font-serif text-xl font-semibold">Research interests & field</h2>
-          <p className="mb-4 text-sm text-muted">These drive the search agent&apos;s queries.</p>
-
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-            Field of study
-          </label>
-          <input
-            value={fieldOfStudy}
-            onChange={(e) => setFieldOfStudy(e.target.value)}
-            placeholder="Machine Learning"
-            className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-            Keywords (up to 10, comma-separated)
-          </label>
-          <input
-            value={keywordsInput}
-            onChange={(e) => setKeywordsInput(e.target.value)}
-            placeholder="federated learning, privacy-preserving ML, NeurIPS"
-            className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-
-          <button
-            onClick={handleInterestsSubmit}
-            className="w-full rounded bg-accent py-2 text-sm font-medium text-white"
-          >
-            Next
-          </button>
-        </section>
-      )}
-
-      {step === 4 && (
-        <section>
-          <h2 className="mb-2 font-serif text-xl font-semibold">Target countries & universities</h2>
-
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-            Target countries (up to 15, comma-separated)
-          </label>
-          <input
-            value={countriesInput}
-            onChange={(e) => setCountriesInput(e.target.value)}
-            placeholder="Germany, Netherlands, Canada"
-            className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-            Specific universities (optional, comma-separated)
-          </label>
-          <input
-            value={universitiesInput}
-            onChange={(e) => setUniversitiesInput(e.target.value)}
-            placeholder="ETH Zurich, TU Munich"
-            className="mb-4 w-full rounded border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-
-          <button
-            onClick={handleCountriesSubmit}
-            className="w-full rounded bg-accent py-2 text-sm font-medium text-white"
-          >
-            Next
-          </button>
-        </section>
-      )}
-
-      {step === 5 && (
-        <section>
-          <h2 className="mb-2 font-serif text-xl font-semibold">Degree type & preferences</h2>
-
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Degree type</label>
-          <div className="mb-4 flex gap-2">
-            {DEGREE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setDegreeType(opt.value)}
-                className={`flex-1 rounded border px-3 py-2 text-sm ${
-                  degreeType === opt.value ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="mt-4 md:hidden">
+            <p className="text-base text-white/90">
+              Step {index + 1} of {STEPS.length}: {current.title}
+            </p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/25" role="progressbar" aria-valuenow={index + 1} aria-valuemin={1} aria-valuemax={STEPS.length}>
+              <div className="h-full rounded-full bg-white transition-all duration-500" style={{ width: `${((index + 1) / STEPS.length) * 100}%` }} />
+            </div>
           </div>
 
-          <label className="mb-4 flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={fundingRequired}
-              onChange={(e) => setFundingRequired(e.target.checked)}
-            />
-            Funded positions only
-          </label>
+          <ol className="mt-12 hidden space-y-5 md:block">
+            {STEPS.map((s, i) => {
+              const done = i < index;
+              const active = i === index;
+              return (
+                <li key={s.id} className="flex items-center gap-4" aria-current={active ? "step" : undefined}>
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg font-bold transition-colors ${done ? "bg-white text-brand" : active ? "bg-white text-brand ring-4 ring-white/30" : "bg-brand-deep text-white/80"}`}>
+                    {done ? (
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-label="Done">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      i + 1
+                    )}
+                  </span>
+                  <span>
+                    <span className={`block text-lg ${active ? "font-bold" : ""}`}>{s.title}</span>
+                    <span className="block text-base text-white/80">{s.blurb}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+        <p className="mt-8 hidden text-base text-white/80 md:block">Every step is optional. You can browse openings now and finish later, and change anything in Settings.</p>
+      </aside>
 
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-            Minimum match score to show ({minScore})
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={minScore}
-            onChange={(e) => setMinScore(Number(e.target.value))}
-            className="mb-6 w-full"
-          />
+      <main className="flex items-start justify-center px-5 py-8 sm:px-8 md:items-center md:py-12">
+        <div key={step} className="anim-rise w-full max-w-xl">
+          {step === 1 && (
+            <section>
+              <h1 className="text-3xl font-bold">Connect your AI</h1>
+              <p className="mb-6 mt-2 text-lg text-black/70">Personalised matching runs on your own key from Groq, OpenAI or Anthropic. Without one you can still browse and track every opening.</p>
+              <LlmKeyForm llmKey={llmKey} onChanged={refreshKey} />
+              {llmKey?.status === "valid" && (
+                <button onClick={() => setStep(2)} className={`${buttonClass} mt-6`}>
+                  Continue
+                </button>
+              )}
+              <p className="mt-5 text-center text-base">
+                <Link href="/dashboard" className="font-bold text-brand underline">
+                  Skip for now
+                </Link>
+                <span className="text-black/60">, and just browse openings.</span>
+              </p>
+            </section>
+          )}
 
-          <button onClick={handleFinish} className="w-full rounded bg-accent py-2 text-sm font-medium text-white">
-            Finish & find opportunities
-          </button>
-        </section>
-      )}
+          {step === 2 && (
+            <section>
+              <h1 className="text-3xl font-bold">Upload your CV</h1>
+              <p className="mb-6 mt-2 text-lg text-black/70">We read your education, experience and skills so matches reflect your real background.</p>
+              <FileDrop file={cvFile} onFile={setCvFile} disabled={busy} />
+              {cvError && (
+                <p role="alert" className="mb-5 rounded-lg bg-white px-4 py-3 text-base text-black">
+                  Upload failed: {cvError}
+                </p>
+              )}
+              <button onClick={handleCvUpload} disabled={!cvFile || busy} className={buttonClass}>
+                {busy ? "Uploading..." : "Upload and continue"}
+              </button>
+              {cv && cv.parse_status !== "error" && (
+                <button type="button" onClick={() => goNext(3)} className="mt-4 block w-full text-center text-lg font-bold text-brand underline">
+                  Keep my current CV ({cv.filename})
+                </button>
+              )}
+              <BackButton onClick={goBack} />
+              <p className="mt-5 text-center text-base">
+                <Link href="/dashboard" className="font-bold text-brand underline">
+                  Skip for now
+                </Link>
+                <span className="text-black/60">, you can upload it from the dashboard later.</span>
+              </p>
+            </section>
+          )}
+
+          {step === 3 && (
+            <section>
+              <h1 className="text-3xl font-bold">What do you want to study?</h1>
+              <p className="mb-6 mt-2 text-lg text-black/70">These words drive every search we run for you.</p>
+              <label htmlFor="field" className={labelClass}>
+                Field of study
+              </label>
+              <input id="field" value={fieldOfStudy} onChange={(e) => setFieldOfStudy(e.target.value)} placeholder="Machine learning" className={softInputClass} />
+              <TagInput id="keywords" label="Keywords" hint="Press Enter or comma after each one." value={keywords} onChange={setKeywords} max={10} placeholder="federated learning, privacy" />
+              <button onClick={handleInterestsSubmit} disabled={busy} className={buttonClass}>
+                {busy ? "Saving..." : "Continue"}
+              </button>
+              <BackButton onClick={goBack} />
+            </section>
+          )}
+
+          {step === 4 && (
+            <section>
+              <h1 className="text-3xl font-bold">Where do you want to study?</h1>
+              <p className="mb-6 mt-2 text-lg text-black/70">Pick countries, and add specific universities if you have favourites.</p>
+              <TagInput id="countries" label="Countries" hint="Press Enter or comma after each one." value={countries} onChange={setCountries} max={15} placeholder="Germany, Netherlands, Canada" />
+              <TagInput id="universities" label="Specific universities (optional)" hint="We search their own pages too." value={universities} onChange={setUniversities} placeholder="ETH Zurich, TU Munich" />
+              <button onClick={handleCountriesSubmit} disabled={busy} className={buttonClass}>
+                {busy ? "Saving..." : "Continue"}
+              </button>
+              <BackButton onClick={goBack} />
+            </section>
+          )}
+
+          {step === 5 && (
+            <section>
+              <h1 className="text-3xl font-bold">Last step: your preferences</h1>
+              <p className="mb-6 mt-2 text-lg text-black/70">Then we run your first search.</p>
+              <Segmented label="Degree type" options={DEGREE_OPTIONS} value={degreeType} onChange={setDegreeType} />
+              <Switch label="Funded positions only" hint="Hide openings that list no funding." checked={fundingRequired} onChange={setFundingRequired} />
+              <div className="mb-6">
+                <ScoreSlider value={minScore} onChange={setMinScore} />
+              </div>
+              <button onClick={handleFinish} disabled={busy} className={buttonClass}>
+                {busy ? "Starting your search..." : "Finish and find opportunities"}
+              </button>
+              <BackButton onClick={goBack} />
+            </section>
+          )}
+        </div>
+      </main>
     </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="mt-5 block w-full text-center text-lg font-bold text-brand underline">
+      Back
+    </button>
   );
 }

@@ -34,3 +34,7 @@ export const inputClass =
 export const labelClass = "mb-1.5 block text-base font-bold text-black";
 export const buttonClass =
   "w-full rounded-lg bg-brand py-3 text-lg font-bold text-white transition-colors hover:bg-brand-deep disabled:opacity-50";
+
+// White fields for use on pale-blue cards.
+export const softInputClass =
+  "mb-5 w-full rounded-lg border-2 border-brand-mid bg-white px-4 py-3 text-lg text-black outline-none placeholder:text-black/40 focus:border-brand";
