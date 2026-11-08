@@ -87,6 +87,20 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {profile && profile.onboarding_step < 5 && (
+        <section className="mb-8 flex flex-col items-start justify-between gap-4 rounded-2xl bg-brand p-6 text-white sm:flex-row sm:items-center">
+          <div>
+            <h2 className="text-xl font-bold">Get started by uploading your CV</h2>
+            <p className="mt-1 max-w-xl text-base text-white/90">
+              Your matches appear here once we know your background. Setup takes about five minutes, and the search runs daily after that.
+            </p>
+          </div>
+          <Link href="/onboarding" className="shrink-0 rounded-lg bg-white px-5 py-3 font-bold text-brand hover:bg-brand-soft">
+            Upload your CV
+          </Link>
+        </section>
+      )}
+
       <div className="mb-6 flex flex-wrap items-center gap-2">
         {(["all", "phd", "msc"] as const).map((t) => (
           <button
@@ -122,8 +136,7 @@ export default function DashboardPage() {
         <p className="text-sm text-muted">Loading opportunities…</p>
       ) : visibleMatches.length === 0 ? (
         <p className="text-sm text-muted">
-          No matches yet. The search agent runs daily — check back soon, or lower your minimum score threshold in
-          Settings.
+          No matches yet. {profile && profile.onboarding_step < 5 ? "Upload your CV above to get started." : "The search agent runs daily. Check back soon, or lower your minimum score threshold in Settings."}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

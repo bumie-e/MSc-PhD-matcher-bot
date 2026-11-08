@@ -39,7 +39,7 @@ export default function SignupPage() {
       return;
     }
     if (data.session) {
-      router.replace("/onboarding");
+      router.replace("/dashboard");
       return;
     }
     setConfirmSentTo(email);

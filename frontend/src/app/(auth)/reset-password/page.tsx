@@ -23,7 +23,7 @@ export default function ResetPasswordPage() {
       setError(updateError.message);
       return;
     }
-    router.replace("/");
+    router.replace("/dashboard");
   };
 
   return (

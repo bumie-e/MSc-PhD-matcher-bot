@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AuthShell, buttonClass, inputClass, labelClass } from "@/components/AuthShell";
+import { useSession } from "@/hooks/useSession";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -13,6 +14,12 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
+  const { session } = useSession();
+
+  // Arriving from the confirmation email signs the user in; skip the form.
+  useEffect(() => {
+    if (session) router.replace("/dashboard");
+  }, [session, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +33,7 @@ export default function LoginPage() {
       setError(signInError.message === "Email not confirmed" ? "Confirm your email first. Check your inbox for the link we sent." : signInError.message);
       return;
     }
-    router.replace("/");
+    router.replace("/dashboard");
   };
 
   return (
