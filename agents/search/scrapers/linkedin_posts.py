@@ -6,6 +6,8 @@ more stable to scrape than its full-text search results. The Search Agent
 runs this once per user (using that user's own cookie), not once globally.
 """
 
+import hashlib
+
 from playwright.sync_api import sync_playwright
 
 from agents.search.scrapers.base import RawListing
@@ -16,6 +18,17 @@ SOURCE_NAME = "linkedin_posts"
 
 def _hashtag_url(tag: str) -> str:
     return f"https://www.linkedin.com/feed/hashtag/{tag}/"
+
+
+def _pseudo_url(tag: str, text: str) -> str:
+    """Stable dedup key: SHA-256 of the normalised post text.
+
+    Python's built-in hash() is salted per process (PYTHONHASHSEED), so it
+    yields a different value on every run and breaks dedup.
+    """
+    normalised = " ".join(text.split())
+    digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:16]
+    return f"{_hashtag_url(tag)}#{digest}"
 
 
 def search_for_user(cookie: str, hashtags: list[str] | None = None) -> list[RawListing]:
@@ -62,7 +75,7 @@ def search_for_user(cookie: str, hashtags: list[str] | None = None) -> list[RawL
                 # extra clicks; use a content hash as a stable dedup key
                 # instead of a real URL, then let the structuring step
                 # decide whether this is even a real opportunity.
-                pseudo_url = f"https://www.linkedin.com/feed/hashtag/{tag}/#{hash(text) & 0xFFFFFFFF}"
+                pseudo_url = _pseudo_url(tag, text)
 
                 listings.append(
                     RawListing(
