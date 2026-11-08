@@ -23,10 +23,16 @@ jobs:
   match:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Mask identifiers
+        env:
+          USER_ID: ${{ inputs.user_id }}
+        run: |
+          if [ -n "$USER_ID" ]; then echo "::add-mask::$USER_ID"; fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
 
       - name: Install dependencies
         run: uv sync
@@ -37,8 +43,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # Decrypts each user's own AI key. No shared LLM key is used here.
           COOKIE_ENCRYPTION_KEY: ${{ secrets.COOKIE_ENCRYPTION_KEY }}
+          OPP_IDS: ${{ inputs.opp_ids }}
+          USER_ID: ${{ inputs.user_id }}
+          RESCORE: ${{ inputs.rescore }}
         run: |
-          uv run python -m agents.matching.agent \
-            --opp-ids "${{ inputs.opp_ids }}" \
-            --user-id "${{ inputs.user_id }}" \
-            ${{ inputs.rescore == 'true' && '--rescore' || '' }}
+          args=(--opp-ids "$OPP_IDS" --user-id "$USER_ID")
+          if [ "$RESCORE" = "true" ]; then args+=(--rescore); fi
+          uv run python -m agents.matching.agent "${args[@]}"

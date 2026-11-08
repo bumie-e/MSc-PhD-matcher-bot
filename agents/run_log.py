@@ -13,7 +13,7 @@ from agents.db import get_client
 def track_run(agent: str, **meta):
     """Yields a mutable `summary` dict — populate it with counts/ids as the
     run progresses. Logs 'success' with that summary on a clean exit, or
-    'error' (with the exception message) if the wrapped code raises; the
+    'error' (with the exception type only) if the wrapped code raises; the
     exception is always re-raised so the workflow step still fails loudly."""
     db = get_client()
     resp = (
@@ -32,7 +32,8 @@ def track_run(agent: str, **meta):
                 "status": "error",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "summary": summary,
-                "error": str(exc)[:2000],
+                # Type only: messages can echo CV or listing text.
+                "error": type(exc).__name__,
             }
         ).eq("id", run_id).execute()
         raise

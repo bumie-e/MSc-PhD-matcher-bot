@@ -7,10 +7,9 @@ if `search()` starts returning zero results, re-inspect the live page and
 update SELECTORS before assuming the keyword had no matches.
 """
 
-import httpx
 from bs4 import BeautifulSoup
 
-from agents.search.scrapers.base import RawListing
+from agents.search.scrapers.base import RawListing, scraper_client
 
 BASE_URL = "https://www.findaphd.com/phds/"
 SOURCE_NAME = "findaphd"
@@ -39,7 +38,7 @@ def search(keywords: list[str], max_pages: int = 2) -> list[RawListing]:
     """
     listings: list[RawListing] = []
 
-    with httpx.Client(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+    with scraper_client(HEADERS) as client:
         for keyword in keywords:
             for page in range(1, max_pages + 1):
                 params = {"Keywords": keyword, "PG": page}

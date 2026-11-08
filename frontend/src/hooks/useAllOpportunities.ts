@@ -7,6 +7,14 @@ import type { Opportunity } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
+// Closed openings are left out: no deadline means still open, otherwise the
+// deadline must be today or later (local date).
+const openFilter = () => {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `deadline.is.null,deadline.gte.${today}`;
+};
+
 // Every opportunity the search agent has ever found, independent of any
 // user's match score — the raw pool matches are drawn from. Shown as a
 // separate "All discovered opportunities" section beneath the personalized
@@ -23,6 +31,7 @@ export function useAllOpportunities() {
       .from("opportunities")
       .select("*", { count: "exact" })
       .eq("is_valid", true)
+      .or(openFilter())
       .order("created_at", { ascending: false })
       .range(0, PAGE_SIZE - 1);
 
@@ -52,6 +61,7 @@ export function useAllOpportunities() {
       .from("opportunities")
       .select("*", { count: "exact" })
       .eq("is_valid", true)
+      .or(openFilter())
       .order("created_at", { ascending: false })
       .range(opportunities.length, opportunities.length + PAGE_SIZE - 1);
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { buttonClass, labelClass, softInputClass } from "@/components/AuthShell";
 import { Segmented, ScoreSlider, Switch } from "@/components/ui/Controls";
@@ -72,6 +72,7 @@ function Wizard({
 
   const [step, setStep] = useState(firstIncompleteStep(profile, llmKey, cv));
   const [busy, setBusy] = useState(false);
+  const [keyNotice, setKeyNotice] = useState<string | null>(null);
 
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
@@ -83,6 +84,15 @@ function Wizard({
   const [degreeType, setDegreeType] = useState<Degree>(profile?.degree_type ?? "both");
   const [fundingRequired, setFundingRequired] = useState(profile?.funding_required ?? false);
   const [minScore, setMinScore] = useState(profile?.min_score_threshold ?? 40);
+
+  // The CV is read with the user's own key, so step 2 is unreachable without one.
+  const keyReady = llmKey?.status === "valid";
+  useEffect(() => {
+    if (step >= 2 && !keyReady) {
+      setKeyNotice("Connect your AI key first. Your CV and matches are processed with it.");
+      setStep(1);
+    }
+  }, [step, keyReady]);
 
   const index = STEPS.findIndex((s) => s.id === step);
   const current = STEPS[index];
@@ -98,6 +108,11 @@ function Wizard({
 
   const handleCvUpload = async () => {
     if (!cvFile) return;
+    if (!keyReady) {
+      setKeyNotice("Connect your AI key first. Your CV is read with it.");
+      setStep(1);
+      return;
+    }
     setBusy(true);
     setCvError(null);
 
@@ -109,7 +124,13 @@ function Wizard({
       return;
     }
 
-    const { error: fnError } = await invokeFn("upload-cv", { storage_path: storagePath, filename: cvFile.name });
+    const { error: fnError, code } = await invokeFn("upload-cv", { storage_path: storagePath, filename: cvFile.name });
+    if (code === "llm_key_required") {
+      setKeyNotice("Your AI key is missing or not working. Connect it, then upload your CV.");
+      setStep(1);
+      setBusy(false);
+      return;
+    }
     if (fnError) {
       setCvError(fnError);
       setBusy(false);
@@ -202,6 +223,11 @@ function Wizard({
             <section>
               <h1 className="text-3xl font-bold">Connect your AI</h1>
               <p className="mb-6 mt-2 text-lg text-black/70">Personalised matching runs on your own key from Groq, OpenAI or Anthropic. Without one you can still browse and track every opening.</p>
+              {keyNotice && !keyReady && (
+                <p role="alert" className="mb-5 rounded-lg bg-white px-4 py-3 text-base font-bold text-black">
+                  {keyNotice}
+                </p>
+              )}
               <LlmKeyForm llmKey={llmKey} onChanged={refreshKey} />
               {llmKey?.status === "valid" && (
                 <button onClick={() => setStep(2)} className={`${buttonClass} mt-6`}>

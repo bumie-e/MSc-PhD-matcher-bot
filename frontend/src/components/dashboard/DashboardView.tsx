@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { invokeFn } from "@/lib/functions";
 import { daysUntil, shortDeadline } from "@/lib/deadline";
@@ -31,6 +31,7 @@ export interface DashboardViewProps {
   loadMore: () => void;
   llmKey: UserLlmKey | null;
   cv: UserCv | null;
+  refreshItems: () => void;
 }
 
 const FOCUS_LABEL: Record<Focus, string> = { all: "All openings", closing: "Closing in 14 days", saved: "Saved by you" };
@@ -45,6 +46,12 @@ function firstName(displayName: string | null | undefined, email: string | undef
   const word = raw.split(/[ ._-]/)[0];
   return word ? word[0].toUpperCase() + word.slice(1) : "there";
 }
+
+// Openings whose deadline has passed are not shown in Explore or For you (saved ones stay in the pipeline).
+const isOpen = (i: OpportunityItem) => {
+  const d = daysUntil(i.opportunity.deadline);
+  return d === null || d >= 0;
+};
 
 const isClosingSoon = (i: OpportunityItem) => {
   const d = daysUntil(i.opportunity.deadline);
@@ -69,7 +76,7 @@ function Segmented<T extends string>({ label, options, value, onChange }: { labe
   );
 }
 
-export function DashboardView({ email, profile, items, itemsLoading, upsertNote, removeNote, pool, poolLoading, hasMore, loadMore, llmKey, cv }: DashboardViewProps) {
+export function DashboardView({ email, profile, items, itemsLoading, upsertNote, removeNote, pool, poolLoading, hasMore, loadMore, llmKey, cv, refreshItems }: DashboardViewProps) {
   const [userTab, setUserTab] = useState<Tab | null>(null);
   const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -77,6 +84,7 @@ export function DashboardView({ email, profile, items, itemsLoading, upsertNote,
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scoring, setScoring] = useState<"idle" | "starting" | "started" | "failed">("idle");
+  const [scoringError, setScoringError] = useState<string | null>(null);
 
   const threshold = profile?.min_score_threshold ?? 0;
 
@@ -84,16 +92,16 @@ export function DashboardView({ email, profile, items, itemsLoading, upsertNote,
   const all = useMemo(() => {
     const map = new Map<string, OpportunityItem>(items.map((i) => [i.id, i]));
     for (const o of pool) if (!map.has(o.id)) map.set(o.id, { id: o.id, opportunity: o, match: null, user_note: null });
-    return [...map.values()].filter((i) => i.opportunity.is_valid !== false);
+    return [...map.values()].filter((i) => i.opportunity.is_valid !== false && isOpen(i));
   }, [items, pool]);
 
-  const matches = useMemo(() => items.filter((i) => i.match && i.match.score >= threshold), [items, threshold]);
+  const matches = useMemo(() => items.filter((i) => i.match && i.match.score >= threshold && isOpen(i)), [items, threshold]);
   const savedCount = useMemo(() => all.filter((i) => i.user_note).length, [all]);
   const closingCount = useMemo(() => all.filter(isClosingSoon).length, [all]);
 
   const p = getPersonalisation({ llmKey, cv, profile, matchCount: items.filter((i) => i.match).length });
   const hasScores = items.some((i) => i.match);
-  const tab: Tab = userTab ?? (hasScores ? "foryou" : "explore");
+  const tab: Tab = userTab ?? (hasScores || p.ready ? "foryou" : "explore");
   const sort: SortKey = sortKey ?? (tab === "foryou" ? "score" : "newest");
 
   const list = useMemo(() => {
@@ -128,9 +136,41 @@ export function DashboardView({ email, profile, items, itemsLoading, upsertNote,
 
   const scoreNextBatch = async () => {
     setScoring("starting");
+    setScoringError(null);
     const { error } = await invokeFn("rematch-me");
+    setScoringError(error);
     setScoring(error ? "failed" : "started");
   };
+
+  // Once the key, CV and preferences are all in place, scoring starts by itself. If the key was
+  // only just saved, the server already started a run, so wait rather than double-spend the key.
+  const keySavedSecondsAgo = llmKey?.validated_at ? (Date.now() - new Date(llmKey.validated_at).getTime()) / 1000 : Infinity;
+  const waitingForFirstScores = p.ready && !hasScores;
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!waitingForFirstScores || itemsLoading || autoStarted.current || scoring !== "idle" || keySavedSecondsAgo < 120) return;
+    try {
+      const k = `autoscore:${profile?.id}`;
+      if (Date.now() - Number(sessionStorage.getItem(k) ?? 0) < 10 * 60_000) return;
+      sessionStorage.setItem(k, String(Date.now()));
+    } catch {
+      /* storage unavailable: the ref still stops repeats in this visit */
+    }
+    autoStarted.current = true;
+    void scoreNextBatch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingForFirstScores, itemsLoading, scoring, keySavedSecondsAgo]);
+
+  // Pick up new scores as they land, for a few minutes after scoring starts.
+  useEffect(() => {
+    if (!waitingForFirstScores && scoring !== "started") return;
+    let n = 0;
+    const id = window.setInterval(() => {
+      refreshItems();
+      if (++n >= 40) window.clearInterval(id);
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [waitingForFirstScores, scoring, refreshItems]);
 
   const name = firstName(profile?.display_name, email);
   const typeCount = (t: OpportunityType) => (tab === "foryou" ? matches : all).filter((i) => i.opportunity.type === t).length;
@@ -167,6 +207,12 @@ export function DashboardView({ email, profile, items, itemsLoading, upsertNote,
           </h1>
           <p className="anim-rise mt-2 text-xl text-white/90" style={{ animationDelay: "60ms" }}>
             {subtitle}
+          </p>
+          <p className="anim-rise mt-1 text-base text-white/80" style={{ animationDelay: "90ms" }}>
+            We gave you a friendly name.{" "}
+            <Link href="/settings#profile" className="font-bold text-white underline">
+              Change it in Settings
+            </Link>
           </p>
 
           <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -250,10 +296,10 @@ export function DashboardView({ email, profile, items, itemsLoading, upsertNote,
           </div>
           {tab === "foryou" && p.ready && (
             <p className="-mt-3 mb-6 text-base text-black/70" role="status">
-              {scoring === "started"
-                ? "New scores appear here as they finish, usually within a few minutes."
+              {scoring === "started" || (waitingForFirstScores && scoring === "idle")
+                ? "Scoring your openings now. New scores appear here as they finish, usually within a few minutes."
                 : scoring === "failed"
-                  ? "Could not start scoring. Try again in a moment."
+                  ? (scoringError ?? "Could not start scoring. Try again in a moment.")
                   : "Scoring uses your own AI key, up to 40 openings per batch."}
             </p>
           )}

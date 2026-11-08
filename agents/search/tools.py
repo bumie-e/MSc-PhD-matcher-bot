@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from agents import crypto
 from agents.db import get_client
-from agents.search.scrapers import linkedin_posts, researchgate, tavily_search, university_search
+from agents.redact import err, uid
+from agents.search.scrapers import researchgate, tavily_search, university_search
 from agents.search.scrapers.base import RawListing
 from agents.search.scrapers.registry import GLOBAL_KEYWORD_SCRAPERS
 from config import settings
@@ -67,41 +67,18 @@ def scrape_source(source_name: str, keywords: list[str]) -> list[dict]:
 
 
 def scrape_all_global_sources(keywords: list[str]) -> list[dict]:
-    """Run every keyword-based scraper (everything except LinkedIn, which is
-    per-user, and Tavily, which is an explicit catch-all tool)."""
+    """Run every keyword-based scraper (everything except Tavily, which is an explicit catch-all tool)."""
     listings: list[dict] = []
     for source_name in GLOBAL_KEYWORD_SCRAPERS:
         try:
             listings.extend(scrape_source(source_name, keywords))
         except Exception as exc:  # noqa: BLE001 — one source failing shouldn't kill the run
-            print(f"[{source_name}] scrape failed: {exc}")
+            print(f"[{source_name}] scrape failed: {err(exc)}")
     return listings
 
 
 def tavily_search_tool(keywords: list[str]) -> list[dict]:
     return _listings_to_dicts(tavily_search.search(keywords))
-
-
-def get_user_linkedin_cookie(user_id: str) -> str | None:
-    """Fetch and decrypt a user's li_at cookie. Returns None if the user
-    hasn't connected LinkedIn — callers should skip the LinkedIn step, not
-    error out."""
-    db = get_client()
-    resp = db.table("linkedin_sessions").select("cookie_enc").eq("user_id", user_id).execute()
-    if not resp.data:
-        return None
-    return crypto.decrypt_cookie(resp.data[0]["cookie_enc"])
-
-
-def scrape_linkedin_for_user(user_id: str) -> list[dict]:
-    cookie = get_user_linkedin_cookie(user_id)
-    if not cookie:
-        return []
-    try:
-        return _listings_to_dicts(linkedin_posts.search_for_user(cookie))
-    except Exception as exc:  # noqa: BLE001 — a stale/invalid cookie shouldn't kill the run
-        print(f"[linkedin_posts] scrape failed for user {user_id}: {exc}")
-        return []
 
 
 def scrape_universities_for_user(
@@ -115,7 +92,7 @@ def scrape_universities_for_user(
         try:
             listings.extend(_listings_to_dicts(university_search.search_for_university(university, keywords)))
         except Exception as exc:  # noqa: BLE001 — one university failing shouldn't kill the run
-            print(f"[university_search] scrape failed for '{university}' (user {user_id}): {exc}")
+            print(f"[university_search] scrape failed for '{university}' (user {uid(user_id)}): {err(exc)}")
     return listings
 
 
@@ -131,7 +108,7 @@ def scrape_researchgate_for_user(user_id: str, field_of_study: str | None, keywo
             field_of_study, keywords, max_results=settings.LAB_DISCOVERY_MAX_LABS_PER_USER_PER_RUN
         )
     except Exception as exc:  # noqa: BLE001 — Tavily hiccup shouldn't kill the run
-        print(f"[researchgate] profile discovery failed for user {user_id}: {exc}")
+        print(f"[researchgate] profile discovery failed for user {uid(user_id)}: {err(exc)}")
         return []
 
     if not candidate_urls:
@@ -155,7 +132,7 @@ def scrape_researchgate_for_user(user_id: str, field_of_study: str | None, keywo
     try:
         results = researchgate.search_for_profiles(to_visit)
     except Exception as exc:  # noqa: BLE001 — Playwright/browser failure shouldn't kill the run
-        print(f"[researchgate] crawl failed for user {user_id}: {exc}")
+        print(f"[researchgate] crawl failed for user {uid(user_id)}: {err(exc)}")
         return []
 
     now = datetime.now(timezone.utc).isoformat()
@@ -192,14 +169,14 @@ def write_opportunities(opportunities: list[dict]) -> list[str]:
         resp = db.table("opportunities").insert(opportunities).execute()
         return [row["id"] for row in resp.data]
     except Exception as exc:  # noqa: BLE001 — one bad row must not lose the whole batch
-        print(f"Batch insert failed ({exc}); retrying opportunities one at a time.")
+        print(f"Batch insert failed ({err(exc)}); retrying opportunities one at a time.")
         ids: list[str] = []
         for opp in opportunities:
             try:
                 resp = db.table("opportunities").insert(opp).execute()
                 ids.extend(row["id"] for row in resp.data)
             except Exception as row_exc:  # noqa: BLE001
-                print(f"Skipping opportunity {opp.get('source_url')}: {row_exc}")
+                print(f"Skipping opportunity {opp.get('source_url')}: {err(row_exc)}")
         return ids
 
 

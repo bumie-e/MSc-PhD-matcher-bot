@@ -5,10 +5,9 @@ by inspecting the live search page, which is a standard web form with
 query params, not a documented API. This is a scraper like the others.
 """
 
-import httpx
 from bs4 import BeautifulSoup
 
-from agents.search.scrapers.base import RawListing
+from agents.search.scrapers.base import RawListing, scraper_client
 
 BASE_URL = "https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/"
 SOURCE_NAME = "daad"
@@ -30,7 +29,7 @@ SELECTORS = {
 def search(keywords: list[str]) -> list[RawListing]:
     listings: list[RawListing] = []
 
-    with httpx.Client(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+    with scraper_client(HEADERS) as client:
         for keyword in keywords:
             resp = client.get(BASE_URL, params={"q": keyword})
             if resp.status_code != 200:

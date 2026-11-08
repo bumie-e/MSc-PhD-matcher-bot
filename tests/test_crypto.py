@@ -15,7 +15,7 @@ def _cookie_key(monkeypatch):
 def test_encrypt_decrypt_round_trip():
     from agents import crypto
 
-    plaintext = "AQEDsomefakelinkedincookievalue123"
+    plaintext = "sk-somefakekeyvalue123"
     token = crypto.encrypt_cookie(plaintext)
     assert token != plaintext
     assert crypto.decrypt_cookie(token) == plaintext

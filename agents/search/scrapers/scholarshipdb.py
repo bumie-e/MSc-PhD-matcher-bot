@@ -12,10 +12,9 @@ tools.scrape_all_global_sources, so it degrades gracefully rather than
 crashing the run. Re-check periodically in case they fix it.
 """
 
-import httpx
 from bs4 import BeautifulSoup
 
-from agents.search.scrapers.base import RawListing
+from agents.search.scrapers.base import RawListing, scraper_client
 
 BASE_URL = "https://www.scholarshipdb.net/"
 SOURCE_NAME = "scholarshipdb"
@@ -37,7 +36,7 @@ SELECTORS = {
 def search(keywords: list[str]) -> list[RawListing]:
     listings: list[RawListing] = []
 
-    with httpx.Client(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+    with scraper_client(HEADERS) as client:
         for keyword in keywords:
             resp = client.get(BASE_URL, params={"q": keyword})
             if resp.status_code != 200:

@@ -1,13 +1,13 @@
-"""AES-256-GCM encrypt/decrypt for the LinkedIn `li_at` session cookie.
+"""AES-256-GCM encrypt/decrypt for users' stored AI keys.
 
 Format: base64(iv[12 bytes] || ciphertext || tag[16 bytes]) — this matches
 what the Web Crypto API's `crypto.subtle.encrypt({name: "AES-GCM"}, ...)`
-produces in the `save-linkedin` Deno Edge Function, so a cookie written by
+produces in the `save-llm-key` Deno Edge Function, so a value written by
 the Edge Function can be decrypted here, and vice versa.
 
 COOKIE_ENCRYPTION_KEY is a base64-encoded 32-byte key (generate with
 `openssl rand -base64 32`). Only the service role (this code, run inside
-GitHub Actions) ever sees the decryption key or the plaintext cookie.
+GitHub Actions) ever sees the decryption key or the plaintext.
 """
 
 import base64

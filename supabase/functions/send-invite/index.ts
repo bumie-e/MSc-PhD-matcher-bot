@@ -8,6 +8,7 @@ import { corsHeaders, handleCors } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SITE_URL = Deno.env.get("SITE_URL")!; // e.g. https://<user>.github.io/MSc-PhD-matcher-bot
 
 Deno.serve(async (req) => {
@@ -26,7 +27,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
 
@@ -47,9 +48,15 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
   }
 
-  const { email } = await req.json();
-  if (!email || typeof email !== "string") {
-    return new Response(JSON.stringify({ error: "email is required" }), { status: 400, headers: corsHeaders });
+  let body: { email?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400, headers: corsHeaders });
+  }
+  const email = body.email;
+  if (typeof email !== "string" || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return new Response(JSON.stringify({ error: "A valid email is required" }), { status: 400, headers: corsHeaders });
   }
 
   const token = crypto.randomUUID();
@@ -61,14 +68,15 @@ Deno.serve(async (req) => {
   });
 
   if (insertErr) {
-    return new Response(JSON.stringify({ error: insertErr.message }), { status: 400, headers: corsHeaders });
+    console.error("send-invite: insert failed", insertErr.code);
+    return new Response(JSON.stringify({ error: "Could not create the invite." }), { status: 400, headers: corsHeaders });
   }
 
   const signupLink = `${SITE_URL}/signup?token=${token}&email=${encodeURIComponent(email)}`;
 
   // Email delivery: plug in Resend (or similar) here. Left as a TODO so no
   // email provider key is required to get the invite flow itself working.
-  console.log(`Invite created for ${email}: ${signupLink}`);
+  console.log("Invite created");
 
   return new Response(JSON.stringify({ ok: true, signupLink }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },

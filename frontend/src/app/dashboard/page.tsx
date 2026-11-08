@@ -15,7 +15,7 @@ import { useSession } from "@/hooks/useSession";
 export default function DashboardPage() {
   const { session, loading: sessionLoading } = useSession();
   const { profile } = useProfile(session?.user.id);
-  const { items, loading, upsertNote, removeNote } = useOpportunities(session?.user.id);
+  const { items, loading, upsertNote, removeNote, refresh: refreshItems } = useOpportunities(session?.user.id);
   const { opportunities, loading: poolLoading, hasMore, loadMore } = useAllOpportunities();
   const { llmKey } = useLlmKey(session?.user.id);
   const { cv } = useCv(session?.user.id);
@@ -41,6 +41,7 @@ export default function DashboardPage() {
       loadMore={loadMore}
       llmKey={llmKey}
       cv={cv}
+      refreshItems={refreshItems}
     />
   );
 }

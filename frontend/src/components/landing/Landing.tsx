@@ -14,7 +14,6 @@ const SOURCES = [
   "ProFellow",
   "University job boards",
   "ResearchGate",
-  "LinkedIn posts",
 ];
 
 const STEPS = [

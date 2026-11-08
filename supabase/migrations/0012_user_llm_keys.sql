@@ -2,7 +2,7 @@
 -- or Anthropic). It is used only for that user's personalised work (reading
 -- their CV and scoring matches). Browsing the shared opportunity list needs no key.
 --
--- The key is stored AES-256-GCM encrypted (same scheme as linkedin_sessions).
+-- The key is stored AES-256-GCM encrypted (AES-256-GCM, see agents/crypto.py).
 -- The Edge Function `save-llm-key` validates and writes it with the service
 -- role. The browser may read the row's status columns but never key_enc.
 

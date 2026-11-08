@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { AuthShell, buttonClass, inputClass, labelClass } from "@/components/AuthShell";
 import { supabase } from "@/lib/supabase";
 
@@ -70,17 +71,16 @@ export default function SignupPage() {
         <label htmlFor="password" className={labelClass}>
           Password
         </label>
-        <input
+        <PasswordInput
           id="password"
-          type="password"
           required
-          minLength={8}
+          minLength={12}
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className={`${inputClass} mb-1`}
         />
-        <p className="mb-5 text-sm text-black/60">At least 8 characters.</p>
+        <p className="mb-5 text-sm text-black/60">At least 12 characters.</p>
 
         {error && (
           <p role="alert" className="mb-5 rounded-lg bg-brand-soft px-4 py-3 text-base text-black">

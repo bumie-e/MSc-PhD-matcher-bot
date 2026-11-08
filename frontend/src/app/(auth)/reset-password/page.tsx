@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { AuthShell, buttonClass, inputClass, labelClass } from "@/components/AuthShell";
 import { supabase } from "@/lib/supabase";
 
@@ -27,12 +28,12 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <AuthShell title="Choose a new password" subtitle="Use at least 8 characters.">
+    <AuthShell title="Choose a new password" subtitle="Use at least 12 characters.">
       <form onSubmit={handleSubmit}>
         <label htmlFor="password" className={labelClass}>
           New password
         </label>
-        <input id="password" type="password" required minLength={8} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} />
+        <PasswordInput id="password" required minLength={12} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} />
         {error && (
           <p role="alert" className="mb-5 rounded-lg bg-brand-soft px-4 py-3 text-base text-black">
             {error}

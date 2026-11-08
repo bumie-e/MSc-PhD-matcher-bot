@@ -22,6 +22,10 @@ SEARCH_MODEL = "openai/gpt-oss-20b"
 # for these calls on their own key, so a run is capped.
 MATCH_MAX_PER_USER_PER_RUN = 40
 
+# An opening is hidden for everyone only when this many distinct users' models
+# independently call it a non-posting (one verdict could be prompt-injected).
+INVALIDATE_MIN_VOTES = 2
+
 # Keeps the shared pool populated (and browsable) even before anyone has
 # filled in their interests.
 DEFAULT_SEARCH_KEYWORDS = ["PhD position", "MSc scholarship", "fully funded PhD", "research assistantship"]
@@ -30,6 +34,3 @@ DEFAULT_SEARCH_KEYWORDS = ["PhD position", "MSc scholarship", "fully funded PhD"
 LAB_DISCOVERY_MAX_LABS_PER_USER_PER_RUN = 20
 LAB_DISCOVERY_REVISIT_COOLDOWN_DAYS = 7
 
-# LinkedIn scraping
-LINKEDIN_MAX_POSTS_PER_USER_PER_RUN = 20
-LINKEDIN_HASHTAGS = ["phdposition", "phdopportunity", "mscopportunity"]

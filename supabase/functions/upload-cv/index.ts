@@ -6,9 +6,11 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { corsHeaders, handleCors } from "../_shared/cors.ts";
+import { allowed, TOO_MANY } from "../_shared/ratelimit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const GITHUB_PAT = Deno.env.get("GITHUB_PAT")!;
 const GITHUB_REPO = Deno.env.get("GITHUB_REPO")!; // "owner/repo"
 
@@ -28,7 +30,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
 
@@ -55,6 +57,10 @@ Deno.serve(async (req) => {
     });
   }
 
+  if (!(await allowed(userData.user.id, "upload-cv", 5, "1 hour"))) {
+    return new Response(JSON.stringify(TOO_MANY), { status: 429, headers: corsHeaders });
+  }
+
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   // Reading a CV runs on the user's own AI key, so one must be connected first.
@@ -78,7 +84,8 @@ Deno.serve(async (req) => {
   });
 
   if (insertErr) {
-    return new Response(JSON.stringify({ error: insertErr.message }), { status: 400, headers: corsHeaders });
+    console.error("upload-cv: insert failed", insertErr.code);
+    return new Response(JSON.stringify({ error: "Could not save your CV. Try again." }), { status: 400, headers: corsHeaders });
   }
 
   const dispatchResp = await fetch(
@@ -97,8 +104,8 @@ Deno.serve(async (req) => {
   );
 
   if (!dispatchResp.ok) {
-    const detail = await dispatchResp.text();
-    return new Response(JSON.stringify({ error: `GitHub dispatch failed: ${detail}` }), {
+    console.error("upload-cv: GitHub dispatch failed", dispatchResp.status);
+    return new Response(JSON.stringify({ error: "Could not start reading your CV. Try again later." }), {
       status: 502,
       headers: corsHeaders,
     });

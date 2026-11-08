@@ -12,7 +12,7 @@ re-score openings that already have a match (used after a CV is replaced).
 import argparse
 import json
 
-from agents import run_log
+from agents import run_log, validate
 from agents.llm import (
     LLM,
     LLMAuthError,
@@ -77,7 +77,7 @@ def score_match(llm: LLM, cv: dict, preferences: dict, opportunity: dict) -> dic
     # fall back to the full structured object rather than sending nothing
     # until the user re-uploads and it gets backfilled.
     candidate_profile = parsed.get("summary") or parsed
-    user_content = json.dumps(
+    payload = json.dumps(
         {
             "candidate_profile": candidate_profile,
             "candidate_preferences": {
@@ -99,16 +99,16 @@ def score_match(llm: LLM, cv: dict, preferences: dict, opportunity: dict) -> dic
             },
         }
     )
+    user_content = f"<untrusted_data>\n{payload}\n</untrusted_data>"
     result = llm.complete_json(SCORE_SYSTEM_PROMPT, user_content)
     if result is None:
         print(f"Unusable scoring output for opportunity {opportunity.get('id')}, skipping.")
         return None
-    score = result.get("score")
-    if not isinstance(score, (int, float)) or isinstance(score, bool):
-        print(f"Scoring output for opportunity {opportunity.get('id')} had no numeric score, skipping.")
+    cleaned = validate.match_result(result)
+    if cleaned is None:
+        print(f"Scoring output for opportunity {opportunity.get('id')} failed validation, skipping.")
         return None
-    result["score"] = max(0, min(100, int(score)))
-    return result
+    return cleaned
 
 
 def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = False) -> dict:
@@ -124,7 +124,10 @@ def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = F
         "models_unavailable": 0,
         "rate_limited": 0,
     }
-    invalid_opp_ids: set[str] = set()
+    # Distinct users whose model said an opening is not a real posting. A single
+    # verdict can be steered by hostile page text, so it only hides the opening
+    # from that run; it is marked invalid for everyone once enough users agree.
+    invalid_votes: dict[str, set[str]] = {}
 
     for user in users:
         uid = user["id"]
@@ -151,7 +154,7 @@ def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = F
         print(f"User {uid[:8]} ({llm.provider}): scoring {len(todo)} opening(s).")
 
         for opp in todo:
-            if opp["id"] in invalid_opp_ids:
+            if uid in invalid_votes.get(opp["id"], set()):
                 continue
             try:
                 result = score_match(llm, cv, preferences, opp)
@@ -176,14 +179,15 @@ def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = F
                 continue
             if result.pop("not_an_opportunity", False):
                 print(f"Not a real opportunity, flagging invalid: {opp.get('source_url')}")
-                invalid_opp_ids.add(opp["id"])
+                invalid_votes.setdefault(opp["id"], set()).add(uid)
                 continue
             tools.write_match(uid, opp["id"], result)
             stats["written"] += 1
 
-    if invalid_opp_ids:
-        tools.mark_opportunities_invalid(list(invalid_opp_ids))
-        print(f"Flagged {len(invalid_opp_ids)} opportunity(ies) as invalid.")
+    confirmed = [oid for oid, voters in invalid_votes.items() if len(voters) >= settings.INVALIDATE_MIN_VOTES]
+    if confirmed:
+        tools.mark_opportunities_invalid(confirmed)
+        print(f"Flagged {len(confirmed)} opportunity(ies) as invalid.")
 
     print(f"Wrote {stats['written']} match record(s).")
     return stats

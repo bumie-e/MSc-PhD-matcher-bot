@@ -16,10 +16,19 @@ jobs:
   parse-cv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # The repo is public: hide the user id and CV path from this run's logs.
+      - name: Mask identifiers
+        env:
+          USER_ID: ${{ inputs.user_id }}
+          STORAGE_PATH: ${{ inputs.storage_path }}
+        run: |
+          echo "::add-mask::$USER_ID"
+          echo "::add-mask::$STORAGE_PATH"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
 
       - name: Install dependencies
         run: uv sync
@@ -30,22 +39,27 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # Decrypts the user's own AI key, which reads their CV.
           COOKIE_ENCRYPTION_KEY: ${{ secrets.COOKIE_ENCRYPTION_KEY }}
+          USER_ID: ${{ inputs.user_id }}
+          STORAGE_PATH: ${{ inputs.storage_path }}
         run: |
-          uv run python -m agents.cv.parser \
-            --user-id "${{ inputs.user_id }}" \
-            --storage-path "${{ inputs.storage_path }}"
+          uv run python -m agents.cv.parser --user-id "$USER_ID" --storage-path "$STORAGE_PATH"
 
       - name: Dispatch match.yml for this user
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USER_ID: ${{ inputs.user_id }}
+          REPO: ${{ github.repository }}
         run: |
+          body=$(jq -n --arg uid "$USER_ID" \
+            '{ref:"main",inputs:{opp_ids:"all",user_id:$uid,rescore:"true"}}')
           http_status=$(curl -s -o response.json -w "%{http_code}" -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/match.yml/dispatches" \
-            -d "{\"ref\":\"main\",\"inputs\":{\"opp_ids\":\"all\",\"user_id\":\"${{ inputs.user_id }}\",\"rescore\":\"true\"}}")
+            "https://api.github.com/repos/$REPO/actions/workflows/match.yml/dispatches" \
+            -d "$body")
           echo "HTTP status: $http_status"
-          cat response.json
           if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            echo "Dispatch failed"
             exit 1
           fi
+          exit 0

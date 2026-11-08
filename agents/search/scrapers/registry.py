@@ -1,6 +1,6 @@
 """Every scraper that shares the plain `search(keywords) -> list[RawListing]`
 signature, so the search agent can loop over them generically instead of
-hardcoding each call. LinkedIn (per-user cookie) and Tavily (different
+hardcoding each call. Tavily (different
 result shape / used as an explicit catch-all) are wired separately in
 agents/search/tools.py.
 """
