@@ -32,7 +32,7 @@ export function getPersonalisation(args: {
   const prefsOk = (profile?.onboarding_step ?? 0) >= 5;
 
   const key: PersonalisationStep = !llmKey
-    ? { id: "key", title: "Connect your AI key", detail: "Use Groq, OpenAI or Anthropic. You pay your provider directly, and it is only used for your own matches.", state: "todo" }
+    ? { id: "key", title: "Connect your AI key", detail: "Use Groq, OpenAI, Anthropic, Gemini or DeepSeek. You pay your provider directly, and it is only used for your own matches.", state: "todo" }
     : keyOk
       ? { id: "key", title: "AI key connected", detail: `Using your ${llmKey.provider} key.`, state: "done" }
       : llmKey.status === "model_unavailable"

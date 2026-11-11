@@ -73,7 +73,7 @@ export interface MatchWithOpportunity extends Match {
   user_note: UserNote | null;
 }
 
-export type LlmProvider = "groq" | "openai" | "anthropic";
+export type LlmProvider = "groq" | "openai" | "anthropic" | "gemini" | "deepseek";
 
 // Status of the user's own AI key. The ciphertext itself is never readable from the browser.
 export interface UserLlmKey {

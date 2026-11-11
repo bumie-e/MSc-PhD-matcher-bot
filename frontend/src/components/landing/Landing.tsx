@@ -23,7 +23,7 @@ const STEPS = [
   },
   {
     title: "Connect your AI key",
-    body: "When you want scores, add your own Groq, OpenAI or Anthropic key and upload your CV. You pay your provider directly.",
+    body: "When you want scores, add your own Groq, OpenAI, Anthropic, Gemini or DeepSeek key and upload your CV. You pay your provider directly.",
   },
   {
     title: "Review ranked matches",

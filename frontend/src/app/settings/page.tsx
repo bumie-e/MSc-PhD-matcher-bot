@@ -198,7 +198,7 @@ export default function SettingsPage() {
         </button>
       </Card>
 
-      <Card id="ai" title="Your AI key" description="Personalised matching runs on your own key from Groq, OpenAI or Anthropic. Browsing and saving openings never needs one.">
+      <Card id="ai" title="Your AI key" description="Personalised matching runs on your own key from Groq, OpenAI, Anthropic, Gemini or DeepSeek. Browsing and saving openings never needs one.">
         <LlmKeyForm llmKey={llmKey} onChanged={() => { refreshKey(); refreshCv(); }} />
       </Card>
 

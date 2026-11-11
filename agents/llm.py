@@ -4,36 +4,41 @@ Two kinds of callers:
 
 * Personalised work (reading a CV, scoring matches) uses the *user's own* API
   key, loaded and decrypted by `get_user_llm(user_id)`. Supported providers are
-  Groq, OpenAI and Anthropic. The key never leaves the Actions runner.
+  Groq, OpenAI, Anthropic, Gemini and DeepSeek. Keys are only sent to their
+  respective providers for authentication.
 * The shared search agent structures scraped listings into the common
   `opportunities` pool with the project owner's Groq key (`get_owner_llm()`).
   One shared pass, not a per-user cost.
 
-Every provider is wrapped behind `LLM.complete_json(system, user)`, which
-returns a parsed JSON object, or None when the model returned something
-unusable. Auth failures raise `LLMAuthError` (the caller should stop using that
-key); rate limits raise `LLMRateLimitError` after a few retries.
+Every provider is wrapped behind `LLM.complete_structured(system, user, schema)`,
+which requests JSON Schema output and returns a validated Pydantic model, or
+None when the response is unusable. Auth failures raise `LLMAuthError` (the
+caller should stop using that key); rate limits raise `LLMRateLimitError`
+after a few retries. The selected model must support JSON Schema output.
 """
 
-import json
-import re
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import isfinite
+from typing import TypeVar
 
 import httpx
-import openai
+from pydantic import BaseModel, ValidationError
 
 from agents.db import get_client
+from agents.llm_providers import (
+    PROVIDERS,
+    BaseLLMProvider,
+    ProviderConnectionError,
+    ProviderHTTPError,
+    ProviderResponseError,
+)
 from config import settings
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
-
-OPENAI_COMPATIBLE_BASE_URLS = {
-    "groq": settings.GROQ_BASE_URL,
-    "openai": None,  # SDK default
-}
-
 MAX_RETRIES = 3
+MAX_RETRY_DELAY = 60.0
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 class LLMError(Exception):
@@ -48,8 +53,12 @@ class LLMAuthError(LLMError):
     """The provider rejected the key (invalid, revoked, or out of access)."""
 
 
-class LLMRateLimitError(LLMError):
-    """The provider kept returning rate-limit / overload responses."""
+class LLMUnavailableError(LLMError):
+    """The provider stayed unavailable after bounded retries."""
+
+
+class LLMRateLimitError(LLMUnavailableError):
+    """The provider kept returning rate-limit responses."""
 
 
 class LLMModelUnavailable(LLMError):
@@ -60,135 +69,95 @@ class LLMModelUnavailable(LLMError):
 _MODEL_GONE_CODES = {"model_not_found", "model_decommissioned", "model_not_active", "model_deprecated"}
 
 
-def _model_is_gone(exc: openai.APIStatusError) -> bool:
-    return isinstance(exc, openai.NotFoundError) or getattr(exc, "code", None) in _MODEL_GONE_CODES
-
-
-_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-
-
-def extract_json(text: str | None) -> dict | None:
-    """Parse a JSON object out of model text. Tolerates code fences and prose
-    around the object (Anthropic has no JSON mode). Returns None unless the
-    result is a JSON object."""
-    if not text:
-        return None
-    candidate = _FENCE.sub("", text.strip())
-    try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError:
-        start, end = candidate.find("{"), candidate.rfind("}")
-        if start == -1 or end <= start:
-            return None
+def _retry_delay(headers: httpx.Headers, attempt: int) -> float:
+    """Honor Retry-After (seconds or HTTP date), with exponential backoff otherwise."""
+    milliseconds = headers.get("retry-after-ms")
+    if milliseconds is not None:
         try:
-            parsed = json.loads(candidate[start : end + 1])
-        except json.JSONDecodeError:
-            return None
-    return parsed if isinstance(parsed, dict) else None
+            delay = float(milliseconds) / 1000
+            if isfinite(delay) and delay >= 0:
+                return delay
+        except ValueError:
+            pass
+    retry_after = headers.get("retry-after")
+    if retry_after is not None:
+        try:
+            delay = float(retry_after)
+        except ValueError:
+            try:
+                retry_date = parsedate_to_datetime(retry_after)
+                delay = (retry_date - datetime.now(timezone.utc)).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                delay = -1
+        if isfinite(delay) and delay >= 0:
+            return delay
+    return 2 ** (attempt + 1)
 
 
 class LLM:
     def __init__(self, provider: str, api_key: str, model: str, http_client: httpx.Client | None = None):
-        if provider not in ("groq", "openai", "anthropic"):
+        if provider not in PROVIDERS:
             raise ValueError(f"Unsupported provider: {provider}")
         self.provider = provider
         self.model = model
-        self._api_key = api_key
+        self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=120.0)
+        self._adapter: BaseLLMProvider = PROVIDERS[provider](api_key, model, self._http)
 
-    def complete_json(self, system: str, user: str, max_tokens: int = 4096) -> dict | None:
+    def close(self) -> None:
+        """Close the connection pool if this instance created it."""
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> "LLM":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    def complete_structured(
+        self, system: str, user: str, response_model: type[ResponseT], max_tokens: int = 4096
+    ) -> ResponseT | None:
+        """Request schema-constrained output; never recover JSON from free text."""
+        schema = response_model.model_json_schema()
         for attempt in range(MAX_RETRIES):
             try:
-                if self.provider == "anthropic":
-                    text = self._anthropic(system, user, max_tokens)
-                else:
-                    text = self._openai_compatible(system, user, max_tokens)
-                return extract_json(text)
-            except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
-                # No provider text in the message: OpenAI echoes a masked key, and
-                # these messages end up in public Actions logs.
-                raise LLMAuthError(f"{self.provider} rejected the API key") from exc
-            except openai.RateLimitError as exc:
-                if attempt == MAX_RETRIES - 1:
-                    raise LLMRateLimitError(f"{self.provider} rate limit") from exc
-                time.sleep(2 ** (attempt + 1))
-            except _RetryableHTTP as exc:
-                if attempt == MAX_RETRIES - 1:
-                    raise LLMRateLimitError(f"{self.provider} is busy or rate limited: {exc}") from exc
-                time.sleep(2 ** (attempt + 1))
-            except openai.APIStatusError as exc:
-                if _model_is_gone(exc):
+                text = self._adapter.complete(system, user, response_model.__name__, schema, max_tokens)
+                if not text:
+                    return None
+                return response_model.model_validate_json(text, strict=True)
+            except ValidationError:
+                # Validation errors include input values: never log CV/listing text.
+                print(f"{self.provider} returned invalid structured output")
+                return None
+            except ProviderHTTPError as exc:
+                if exc.status in (401, 403):
+                    raise LLMAuthError(f"{self.provider} rejected the API key") from None
+                if exc.code == "structured_output_unsupported":
+                    raise LLMModelUnavailable(
+                        f"{self.provider} model {self.model} does not support structured output"
+                    ) from None
+                if exc.status == 404 or exc.code in _MODEL_GONE_CODES:
                     gone = f"{self.provider} model {self.model} is no longer available"
-                    raise LLMModelUnavailable(gone) from exc
-                status = getattr(exc, "status_code", None)
-                print(f"{self.provider} request failed ({type(exc).__name__}, status={status})")
+                    raise LLMModelUnavailable(gone) from None
+                if exc.status in (408, 409, 429) or exc.status >= 500:
+                    error_type = LLMRateLimitError if exc.status == 429 else LLMUnavailableError
+                    delay = _retry_delay(exc.headers, attempt)
+                    # A long server delay stops this run; never retry earlier than requested.
+                    if attempt == MAX_RETRIES - 1 or delay > MAX_RETRY_DELAY:
+                        raise error_type(f"{self.provider} unavailable (HTTP {exc.status})") from None
+                    time.sleep(delay)
+                    continue
+                print(f"{self.provider} request failed (status={exc.status})")
                 return None
-            except openai.APIError as exc:
-                # One malformed or truncated generation must not end the whole run.
-                # Log only the error type and status: provider error bodies can
-                # contain pieces of the CV or opportunity text.
-                status = getattr(exc, "status_code", None)
-                print(f"{self.provider} request failed ({type(exc).__name__}, status={status})")
-                return None
-            except httpx.HTTPError as exc:
-                print(f"{self.provider} network error ({type(exc).__name__})")
+            except ProviderConnectionError:
+                if attempt == MAX_RETRIES - 1:
+                    raise LLMUnavailableError(f"{self.provider} could not be reached") from None
+                time.sleep(2 ** (attempt + 1))
+            except ProviderResponseError:
+                print(f"{self.provider} returned an unreadable response")
                 return None
         return None
-
-    def _openai_compatible(self, system: str, user: str, max_tokens: int) -> str | None:
-        client = openai.OpenAI(
-            api_key=self._api_key, base_url=OPENAI_COMPATIBLE_BASE_URLS[self.provider], max_retries=0
-        )
-        kwargs: dict = {}
-        if self.provider == "openai" and re.match(r"^gpt-5", self.model):
-            # GPT-5 models reason before answering; keep that small so the token
-            # budget is left for the JSON. Older GPT models reject this parameter.
-            kwargs["extra_body"] = {"reasoning_effort": "low"}
-        if self.provider == "groq":
-            # gpt-oss models emit a hidden reasoning trace before the JSON body;
-            # without this it can eat the whole token budget and leave empty
-            # content (json_validate_failed). Groq-specific, so via extra_body.
-            kwargs["extra_body"] = {"reasoning_effort": "low"}
-        resp = client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            response_format={"type": "json_object"},
-            max_completion_tokens=max_tokens,
-            **kwargs,
-        )
-        return resp.choices[0].message.content if resp.choices else None
-
-    def _anthropic(self, system: str, user: str, max_tokens: int) -> str | None:
-        resp = self._http.post(
-            ANTHROPIC_URL,
-            headers={
-                "x-api-key": self._api_key,
-                "anthropic-version": ANTHROPIC_VERSION,
-                "content-type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "max_tokens": max_tokens,
-                "system": system + "\n\nRespond with a single JSON object and nothing else.",
-                "messages": [{"role": "user", "content": user}],
-            },
-        )
-        if resp.status_code in (401, 403):
-            raise LLMAuthError(f"anthropic rejected the API key (HTTP {resp.status_code})")
-        if resp.status_code == 404:
-            # The messages endpoint exists, so a 404 means this model does not.
-            raise LLMModelUnavailable(f"anthropic model {self.model} is no longer available")
-        if resp.status_code in (429, 500, 502, 503, 529):
-            raise _RetryableHTTP(f"HTTP {resp.status_code}")
-        if resp.status_code >= 400:
-            print(f"anthropic request failed: HTTP {resp.status_code}")
-            return None
-        blocks = resp.json().get("content") or []
-        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or None
-
-
-class _RetryableHTTP(Exception):
-    pass
 
 
 def get_owner_llm() -> LLM:

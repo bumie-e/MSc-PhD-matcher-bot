@@ -23,22 +23,14 @@ from agents.llm import (
     mark_key_status,
 )
 from agents.redact import err, uid
+from agents.schemas import ParsedCV
 
 STORAGE_BUCKET = "cvs"
 
 STRUCTURE_SYSTEM_PROMPT = """You extract structured fields from a CV's raw text.
 
-Output strictly this JSON shape, no prose:
-{
-  "education": [{"degree": string, "institution": string, "field": string or null, "year": string or null}],
-  "gpa": string or null,
-  "research_experience": [{"role": string, "institution": string, "duration": string or null,
-                            "summary": string}],
-  "publications": [string],
-  "languages": [string],
-  "skills": [string],
-  "summary": string
-}
+Return the result using the supplied response schema, including education,
+GPA, research experience, publications, languages, skills, and summary.
 
 Use [] for any list you find nothing for. Never invent details not present in the text.
 
@@ -93,10 +85,10 @@ def extract_text(pdf_bytes: bytes) -> str:
 
 
 def structure_cv_text(raw_text: str, llm: LLM) -> dict:
-    parsed = llm.complete_json(
-        STRUCTURE_SYSTEM_PROMPT, f"<untrusted_cv>\n{raw_text[:20000]}\n</untrusted_cv>"
+    parsed = llm.complete_structured(
+        STRUCTURE_SYSTEM_PROMPT, f"<untrusted_cv>\n{raw_text[:20000]}\n</untrusted_cv>", ParsedCV
     )
-    parsed = validate.parsed_cv(parsed) if parsed else None
+    parsed = validate.parsed_cv(parsed.model_dump()) if parsed is not None else None
     if parsed is None:
         raise ValueError("The AI model did not return a readable CV structure. Try uploading again.")
     return parsed
@@ -112,17 +104,17 @@ def run(user_id: str, storage_path: str) -> None:
 
     with run_log.track_run("cv_parse", user_id=user_id, storage_path=storage_path) as summary:
         try:
-            llm = get_user_llm(user_id)
-            pdf_bytes = download_cv(storage_path)
-            raw_text = extract_text(pdf_bytes)
-            parsed = structure_cv_text(raw_text, llm)
+            with get_user_llm(user_id) as llm:
+                pdf_bytes = download_cv(storage_path)
+                raw_text = extract_text(pdf_bytes)
+                parsed = structure_cv_text(raw_text, llm)
 
-            db.table("user_cv").update(
-                {"raw_text": raw_text, "parsed": parsed, "parse_status": "done", "parse_error": None}
-            ).eq("user_id", user_id).eq("storage_path", storage_path).execute()
-            summary["parse_status"] = "done"
-            summary["provider"] = llm.provider
-            print(f"Parsed CV for user {uid(user_id)}.")
+                db.table("user_cv").update(
+                    {"raw_text": raw_text, "parsed": parsed, "parse_status": "done", "parse_error": None}
+                ).eq("user_id", user_id).eq("storage_path", storage_path).execute()
+                summary["parse_status"] = "done"
+                summary["provider"] = llm.provider
+                print(f"Parsed CV for user {uid(user_id)}.")
         except LLMKeyMissing as exc:
             summary["parse_status"] = "needs_key"
             fail(str(exc))  # user-facing text from get_user_llm, safe to store
@@ -133,11 +125,11 @@ def run(user_id: str, storage_path: str) -> None:
             fail("Your AI provider rejected your key. Add a new one in Settings.")
             print(f"CV parse failed, key rejected for user {uid(user_id)}.", file=sys.stderr)
         except LLMModelUnavailable:
-            message = "Your AI model is no longer available. Choose another in Settings."
+            message = "Your AI model cannot be used for CV parsing. Choose another in Settings."
             mark_key_status(user_id, "model_unavailable", message)
             summary["parse_status"] = "model_unavailable"
             fail(message)
-            print(f"CV parse failed, model retired for user {uid(user_id)}.", file=sys.stderr)
+            print(f"CV parse failed, model unavailable for user {uid(user_id)}.", file=sys.stderr)
         except LLMError:
             fail("Your AI provider is busy or over its rate limit. Try again in a few minutes.")
             print(f"CV parse failed for user {uid(user_id)}: provider busy or rate limited.", file=sys.stderr)

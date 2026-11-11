@@ -29,7 +29,7 @@ const DEGREE_OPTIONS: { value: Degree; label: string }[] = [
 // Step ids 2..5 are stored in user_profiles.onboarding_step; step 1 (the AI key)
 // lives in user_llm_keys, so existing users keep their progress.
 const STEPS = [
-  { id: 1, title: "Connect your AI", blurb: "Your own Groq, OpenAI or Anthropic key" },
+  { id: 1, title: "Connect your AI", blurb: "Your own Groq, OpenAI, Anthropic, Gemini or DeepSeek key" },
   { id: 2, title: "Upload your CV", blurb: "So we know your background" },
   { id: 3, title: "Your interests", blurb: "What you want to study" },
   { id: 4, title: "Where to study", blurb: "Countries and universities" },
@@ -221,7 +221,7 @@ function Wizard({
           {step === 1 && (
             <section>
               <h1 className="text-3xl font-bold">Connect your AI</h1>
-              <p className="mb-6 mt-2 text-lg text-black/70">Personalised matching runs on your own key from Groq, OpenAI or Anthropic. Without one you can still browse and track every opening.</p>
+              <p className="mb-6 mt-2 text-lg text-black/70">Personalised matching runs on your own key from Groq, OpenAI, Anthropic, Gemini or DeepSeek. Without one you can still browse and track every opening.</p>
               {keyNotice && !keyReady && (
                 <p role="alert" className="mb-5 rounded-lg bg-white px-4 py-3 text-base font-bold text-black">
                   {keyNotice}
