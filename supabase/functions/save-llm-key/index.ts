@@ -1,5 +1,5 @@
 // Supabase Edge Function: connect, change or remove the caller's own LLM key
-// (bring your own key: Groq, OpenAI or Anthropic).
+// (bring your own key: Groq, OpenAI, Anthropic, Gemini or DeepSeek).
 //
 //   POST { provider, api_key, model? }  validate the key with the provider,
 //                                      encrypt it, store it, and resume any
@@ -158,7 +158,9 @@ Deno.serve(async (req) => {
 
   const provider = body.provider as Provider;
   const apiKey = typeof body.api_key === "string" ? body.api_key.trim() : "";
-  if (!PROVIDERS.includes(provider)) return json({ error: "Choose Groq, OpenAI or Anthropic." }, 400);
+  if (!PROVIDERS.includes(provider)) {
+    return json({ error: "Choose Groq, OpenAI, Anthropic, Gemini or DeepSeek." }, 400);
+  }
   if (apiKey.length < 20 || apiKey.length > 300 || /\s/.test(apiKey)) {
     return json({ error: "That does not look like an API key. Paste the whole key with no spaces." }, 400);
   }

@@ -10,6 +10,8 @@ const PROVIDERS: { id: LlmProvider; name: string; blurb: string; keyUrl: string;
   { id: "groq", name: "Groq", blurb: "Fast and inexpensive", keyUrl: "https://console.groq.com/keys", keyLabel: "console.groq.com/keys" },
   { id: "openai", name: "OpenAI", blurb: "GPT models", keyUrl: "https://platform.openai.com/api-keys", keyLabel: "platform.openai.com/api-keys" },
   { id: "anthropic", name: "Anthropic", blurb: "Claude models", keyUrl: "https://console.anthropic.com/settings/keys", keyLabel: "console.anthropic.com/settings/keys" },
+  { id: "gemini", name: "Gemini", blurb: "Google Gemini models", keyUrl: "https://aistudio.google.com/apikey", keyLabel: "aistudio.google.com/apikey" },
+  { id: "deepseek", name: "DeepSeek", blurb: "DeepSeek models", keyUrl: "https://platform.deepseek.com/api_keys", keyLabel: "platform.deepseek.com/api_keys" },
 ];
 
 export const providerName = (p: LlmProvider) => PROVIDERS.find((x) => x.id === p)?.name ?? p;

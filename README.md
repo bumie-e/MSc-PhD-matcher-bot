@@ -16,8 +16,8 @@ This is a multi agent frame work. An agent does the opportunities search everyda
 
 Browsing is free: the daily search fills a shared pool of openings that every
 signed-in user can browse, save and track, with no setup. **Personalised
-matching is optional** and runs on the user's *own* LLM key (Groq, OpenAI or
-Anthropic), so nobody's usage is billed to the project owner.
+matching is optional** and runs on the user's *own* LLM key (Groq, OpenAI,
+Anthropic, Gemini or DeepSeek), so nobody's usage is billed to the project owner.
 
 How it works:
 
@@ -35,15 +35,52 @@ How it works:
    stops, and Settings refreshes the model list and asks the user to pick another.
    Choosing one resumes scoring automatically.
 
-Only chat models are offered (embeddings, speech, image, moderation, dated
-snapshots and OpenAI's o-series are filtered out, capped at 8, cheapest sensible
-default first). See `curateModels` in `supabase/functions/_shared/llm-providers.ts`.
+Only chat models suitable for structured output are offered, capped at 8 with
+the recommended default first. Legacy OpenAI models and Groq models without
+strict JSON Schema support are filtered out alongside non-chat models.
+See `curateModels` in `supabase/functions/_shared/llm-providers.ts`.
 
 The owner's `GROQ_API_KEY` is used **only** by the shared search agent to turn
 scraped listings into structured openings. `COOKIE_ENCRYPTION_KEY` must be set in
 GitHub Actions secrets and Supabase secrets (it decrypts user keys). The
 `save-llm-key` function also needs `GITHUB_PAT` and `GITHUB_REPO`, like the other
 dispatching functions.
+
+Matching, CV parsing, and listing extraction use the Pydantic response models
+in `agents/schemas.py`. OpenAI/Groq/Gemini requests use `json_schema` response
+formats; Anthropic requests use `output_config.format`. DeepSeek uses a forced
+strict tool call on its beta endpoint, with nested schemas inlined and thinking
+disabled. Choose a model that supports its provider's structured output mode.
+Responses are validated before database cleanup; refusals, truncated responses,
+and schema-invalid output are skipped
+without attempting to extract JSON from prose or code fences.
+
+`agents/llm.py` is the common LLM interface; `agents/llm_providers.py` contains
+the OpenAI, Groq, Anthropic, Gemini, and DeepSeek adapters. All providers use
+the same validation, authentication/model error handling, and three-attempt retry policy for rate
+limits, server errors, timeouts, and connection failures. `Retry-After` is
+respected; delays over 60 seconds stop the run so later runs can retry.
+Each agent reuses one connection pool per key and closes it when finished.
+Use `with get_user_llm(user_id) as llm:` (or `get_owner_llm()` for search) for
+new callers. Model-specific reasoning settings stay inside the adapters.
+
+Every provider inherits from `BaseLLMProvider`. OpenAI, Groq, Gemini, and DeepSeek
+share its `OpenAICompatibleProvider` subclass; Anthropic inherits directly. To add a
+provider to the Python agents, subclass `BaseLLMProvider`, implement `complete()`,
+and add the class to the `PROVIDERS` registry. The base constructor supplies
+`model`, `_api_key`, and `_http`. Return completed JSON text (or `None` for a
+refusal/incomplete response), and translate native failures into the shared
+provider exceptions. The LLM facade needs no provider-specific changes.
+An OpenAI-compatible API can instead subclass `OpenAICompatibleProvider` and
+set `base_url`, overriding `request_options()` if needed. Exposing a new
+provider in Settings also requires updating the app's provider choices,
+key validation, and database provider constraint.
+
+To enable Gemini and DeepSeek in a deployed app, apply
+`supabase/migrations/0018_gemini_deepseek_providers.sql`, deploy the updated
+`save-llm-key` Edge Function, and deploy the updated frontend and agent code.
+No existing keys need to be replaced. Neither new provider needs an owner key
+for personal matching; users connect their own through Settings.
 
 Deploying this change: run migration `0012_user_llm_keys.sql`, deploy
 `save-llm-key` and the updated `upload-cv` (`supabase functions deploy
@@ -76,11 +113,23 @@ uv run --env-file .env python -m agents.search.agent
 uv run --env-file .env python -m agents.matching.agent --opp-ids all
 ```
 
+To check a provider without scraping, database writes, or real CV data, set its
+`GEMINI_API_KEY` or `DEEPSEEK_API_KEY` environment variable (or use an ignored
+local `.env`) and run the synthetic check below. A successful check makes three
+billable calls: CV parsing, listing extraction, and match scoring. Choose a
+model available to your key; the names below are examples.
+
+```bash
+uv run --env-file .env python -m agents.check_llm --provider gemini --model gemini-3.5-flash
+uv run --env-file .env python -m agents.check_llm --provider deepseek --model deepseek-flash
+```
+
 Run tests and lint:
 
 ```bash
 uv run --extra dev pytest
 uv run --extra dev ruff check .
+node --experimental-strip-types --test supabase/functions/_shared/llm-providers.test.mjs # Node 22.6+
 ```
 
 ## Local setup — frontend
