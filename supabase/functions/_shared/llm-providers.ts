@@ -40,7 +40,7 @@ const IS_CHAT_MODEL: Record<Provider, RegExp> = {
   // which is a poor fit for strict JSON.
   openai: /^(gpt-|chatgpt)/i,
   anthropic: /^claude-/i,
-  groq: /^(openai\/gpt-oss|llama|meta-llama\/|qwen|moonshotai\/|deepseek|gemma|mistral|mixtral|allam|kimi)/i,
+  groq: /^(openai\/gpt-oss|qwen\/|meta-models\/)/i,
 };
 
 // Dated copies of a model ("gpt-4o-2024-08-06", "claude-x-20250929") clutter the
@@ -68,11 +68,27 @@ const TIERS: Record<Provider, RegExp[]> = {
 // (On Groq, "-instruct" models are normal chat models.)
 const OPENAI_COMPLETIONS_ONLY = /instruct/i;
 
+// Groq's constrained JSON Schema mode is limited to these model IDs.
+// https://console.groq.com/docs/structured-outputs#supported-models
+const GROQ_STRUCTURED_MODELS = new Set([
+  "openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b", "meta-models/muse-spark-open",
+]);
+
+function supportsStructuredOutput(provider: Provider, id: string): boolean {
+  if (provider === "groq") return GROQ_STRUCTURED_MODELS.has(id);
+  if (provider !== "openai") return true;
+  // Legacy GPT-3.5/GPT-4 and the first GPT-4o snapshot only support JSON mode.
+  if (/^gpt-4o-mini(?:-|$)/.test(id) || /^gpt-(?:4\.1|[5-9]\d*(?:\.\d+)?)(?:-|$)/.test(id)) return true;
+  if (id === "gpt-4o") return true;
+  return /^gpt-4o-\d{4}-\d{2}-\d{2}$/.test(id) && id.slice("gpt-4o-".length) >= "2024-08-06";
+}
+
 /** Reduce a provider's raw model list to the chat models worth offering, best default first. */
 export function curateModels(provider: Provider, ids: string[]): string[] {
   const chat = ids.filter(
     (id) =>
       IS_CHAT_MODEL[provider].test(id) &&
+      supportsStructuredOutput(provider, id) &&
       !NOT_TEXT_GENERATION.test(id) &&
       !(provider === "openai" && OPENAI_COMPLETIONS_ONLY.test(id)),
   );

@@ -24,6 +24,7 @@ from agents.llm import (
     mark_key_status,
 )
 from agents.matching import tools
+from agents.schemas import MatchResult
 from config import settings
 
 SCORE_SYSTEM_PROMPT = """You evaluate how well a graduate opportunity matches a candidate.
@@ -35,30 +36,16 @@ non-posting content that was mistakenly stored as an opportunity? If it
 doesn't hold up as a real opportunity (e.g. no real university, a
 title/summary that reads like generic advice content, nothing an
 applicant could actually submit an application to), set
-"not_an_opportunity": true and you may leave the other fields at their
-zero/empty defaults — do not force a plausible-looking score onto it.
+"not_an_opportunity": true and fill all scores with zero, confidence with
+"low", summary with an empty string, and lists with [] — do not force a
+plausible-looking score onto it.
 
 Otherwise, set "not_an_opportunity": false and score 0-100 based on:
 field/research alignment, degree requirements met, GPA/academic fit,
 relevant experience, funding fit, location/country fit.
 
-Output strictly this JSON shape, no prose:
-{
-  "not_an_opportunity": boolean,
-  "score": int (0-100),
-  "score_breakdown": {
-    "field_alignment": int (0-100),
-    "requirements_met": int (0-100),
-    "experience_fit": int (0-100),
-    "funding_fit": int (0-100),
-    "location_fit": int (0-100)
-  },
-  "confidence": "low" or "medium" or "high",
-  "summary": string (2-3 sentences),
-  "pros": [string],
-  "cons": [string],
-  "recommendations": [string]
-}
+Return the result using the supplied response schema. Include a score for
+each breakdown category, a 2-3 sentence summary, pros, cons, and recommendations.
 
 Be honest about weaknesses — cons and a lower score are more useful to the
 candidate than false encouragement.
@@ -100,11 +87,11 @@ def score_match(llm: LLM, cv: dict, preferences: dict, opportunity: dict) -> dic
         }
     )
     user_content = f"<untrusted_data>\n{payload}\n</untrusted_data>"
-    result = llm.complete_json(SCORE_SYSTEM_PROMPT, user_content)
+    result = llm.complete_structured(SCORE_SYSTEM_PROMPT, user_content, MatchResult)
     if result is None:
         print(f"Unusable scoring output for opportunity {opportunity.get('id')}, skipping.")
         return None
-    cleaned = validate.match_result(result)
+    cleaned = validate.match_result(result.model_dump())
     if cleaned is None:
         print(f"Scoring output for opportunity {opportunity.get('id')} failed validation, skipping.")
         return None
@@ -143,46 +130,47 @@ def run(opp_ids: list[str] | None, user_id: str | None = None, rescore: bool = F
             stats["users_skipped"] += 1
             continue
 
-        preferences = tools.get_user_preferences(uid)
-        todo = tools.select_opportunities_for_user(
-            opportunities,
-            preferences,
-            tools.get_scored_opportunity_ids(uid),
-            settings.MATCH_MAX_PER_USER_PER_RUN,
-            rescore=rescore,
-        )
-        print(f"User {uid[:8]} ({llm.provider}): scoring {len(todo)} opening(s).")
+        with llm:
+            preferences = tools.get_user_preferences(uid)
+            todo = tools.select_opportunities_for_user(
+                opportunities,
+                preferences,
+                tools.get_scored_opportunity_ids(uid),
+                settings.MATCH_MAX_PER_USER_PER_RUN,
+                rescore=rescore,
+            )
+            print(f"User {uid[:8]} ({llm.provider}): scoring {len(todo)} opening(s).")
 
-        for opp in todo:
-            if uid in invalid_votes.get(opp["id"], set()):
-                continue
-            try:
-                result = score_match(llm, cv, preferences, opp)
-            except LLMAuthError:
-                print(f"User {uid[:8]}: key rejected, stopping their run.")
-                mark_key_invalid(uid, "Your AI provider rejected this key. Replace it in Settings.")
-                stats["keys_rejected"] += 1
-                break
-            except LLMModelUnavailable:
-                print(f"User {uid[:8]}: model {llm.model} retired, stopping their run.")
-                gone = f"Your model {llm.model} is no longer available. Choose another in Settings."
-                mark_key_status(uid, "model_unavailable", gone)
-                stats["models_unavailable"] += 1
-                break
-            except LLMError:
-                # Rate limited or overloaded: stop spending this user's calls
-                # now. The rest are picked up on the next run.
-                print(f"User {uid[:8]}: provider unavailable, stopping their run.")
-                stats["rate_limited"] += 1
-                break
-            if result is None:
-                continue
-            if result.pop("not_an_opportunity", False):
-                print(f"Not a real opportunity, flagging invalid: {opp.get('source_url')}")
-                invalid_votes.setdefault(opp["id"], set()).add(uid)
-                continue
-            tools.write_match(uid, opp["id"], result)
-            stats["written"] += 1
+            for opp in todo:
+                if uid in invalid_votes.get(opp["id"], set()):
+                    continue
+                try:
+                    result = score_match(llm, cv, preferences, opp)
+                except LLMAuthError:
+                    print(f"User {uid[:8]}: key rejected, stopping their run.")
+                    mark_key_invalid(uid, "Your AI provider rejected this key. Replace it in Settings.")
+                    stats["keys_rejected"] += 1
+                    break
+                except LLMModelUnavailable:
+                    print(f"User {uid[:8]}: model {llm.model} unavailable, stopping their run.")
+                    gone = f"Your model {llm.model} cannot be used for matching. Choose another in Settings."
+                    mark_key_status(uid, "model_unavailable", gone)
+                    stats["models_unavailable"] += 1
+                    break
+                except LLMError:
+                    # Rate limited or overloaded: stop spending this user's calls
+                    # now. The rest are picked up on the next run.
+                    print(f"User {uid[:8]}: provider unavailable, stopping their run.")
+                    stats["rate_limited"] += 1
+                    break
+                if result is None:
+                    continue
+                if result.pop("not_an_opportunity", False):
+                    print(f"Not a real opportunity, flagging invalid: {opp.get('source_url')}")
+                    invalid_votes.setdefault(opp["id"], set()).add(uid)
+                    continue
+                tools.write_match(uid, opp["id"], result)
+                stats["written"] += 1
 
     confirmed = [oid for oid, voters in invalid_votes.items() if len(voters) >= settings.INVALIDATE_MIN_VOTES]
     if confirmed:

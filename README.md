@@ -93,6 +93,20 @@ Browsing is free. **Personalised matching is optional** and runs on the user's o
 The owner's `GROQ_API_KEY` is used only by the shared search agent to turn scraped
 listings into structured openings.
 
+### Structured output
+
+CV parsing, listing extraction and match scoring ask the provider for output that
+matches the Pydantic models in `agents/schemas.py`, then validate it. Refusals,
+truncated replies and schema-invalid output are skipped; JSON is never scraped out
+of prose. Settings only offers models that support structured output (see
+`curateModels` in `supabase/functions/_shared/llm-providers.ts`).
+
+`agents/llm.py` holds the shared retry and error policy; `agents/llm_providers.py` holds
+one adapter per provider. To add a provider, subclass `BaseLLMProvider` (or
+`OpenAICompatibleProvider` for a Chat Completions API), implement `complete()`, and
+register it in `PROVIDERS`. Exposing it in Settings also needs the frontend provider
+list, `save-llm-key` validation and the `user_llm_keys` provider constraint.
+
 ## Getting started
 
 Requirements: Python 3.13+ with [uv](https://docs.astral.sh/uv/), Node 20+, a
@@ -145,6 +159,7 @@ agents also need `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`,
 ```bash
 uv run --extra dev pytest
 uv run --extra dev ruff check .
+node --experimental-strip-types --test supabase/functions/_shared/llm-providers.test.mjs  # Node 22.6+
 cd frontend && npm run lint
 ```
 
