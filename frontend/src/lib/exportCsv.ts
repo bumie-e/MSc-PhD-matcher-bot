@@ -1,8 +1,13 @@
 import type { OpportunityItem } from "@/lib/types";
 
+// Prefixing with a leading apostrophe stops spreadsheet apps (Excel, Sheets)
+// from treating a cell starting with =, +, -, @, or tab/CR as a formula.
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
 function escapeCsvCell(value: string): string {
-  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
+  const safe = FORMULA_PREFIX.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(safe)) return `"${safe.replace(/"/g, '""')}"`;
+  return safe;
 }
 
 const COLUMNS: { header: string; value: (item: OpportunityItem) => string }[] = [
